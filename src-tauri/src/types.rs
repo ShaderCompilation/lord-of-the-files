@@ -91,6 +91,20 @@ pub struct AiGenerateReport {
     pub warning: Option<String>,
 }
 
+/// Emitted once per resolved chunk during `ai::generate`, so the frontend can render live
+/// progress. Purely informational — `AiGenerateReport` (the command's return value) remains
+/// the source of truth for final results.
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct AiProgressEvent {
+    pub generation_id: String,
+    pub chunk_index: u32,
+    pub total_chunks: u32,
+    pub chunk_ok: bool,
+    pub chunk_error: Option<String>,
+    pub chunk_result_count: u32,
+}
+
 /// The transform variants. Internally tagged by `type` so the TS union is ergonomic.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]

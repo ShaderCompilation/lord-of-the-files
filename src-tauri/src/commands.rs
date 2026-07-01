@@ -1,7 +1,9 @@
 //! Thin Tauri command handlers. All real logic lives in `engine`, `fs_scan`, `history`,
 //! `settings`, and `ai`; these just adapt types and lock shared state.
 
-use tauri::State;
+use std::sync::Arc;
+
+use tauri::{Emitter, State};
 
 use crate::ai;
 use crate::engine;
@@ -10,7 +12,19 @@ use crate::history::{
     self, ApplyReport, FileCheck, HistoryDb, Operation, RenameEntry, RenameItem, UndoReport,
 };
 use crate::settings::{self, ProviderProfile, SettingsDb, SettingsState};
-use crate::types::{AiGenerateReport, FileEntry, Pipeline, PreviewResult};
+use crate::types::{AiGenerateReport, AiProgressEvent, FileEntry, Pipeline, PreviewResult};
+
+/// Broadcasts `ai::generate`'s per-chunk progress to the frontend via a Tauri event. Kept
+/// here (not in `ai.rs`) so the `ai` module stays free of any Tauri-specific types.
+struct TauriProgressEmitter(tauri::AppHandle);
+
+impl ai::AiProgressEmitter for TauriProgressEmitter {
+    fn emit(&self, event: AiProgressEvent) {
+        if let Err(e) = self.0.emit("ai-generate-progress", event) {
+            log::warn!("ai-generate-progress emit failed: {e}");
+        }
+    }
+}
 
 #[tauri::command]
 pub fn scan_paths(paths: Vec<String>, recursive: bool, include_dirs: bool) -> Vec<FileEntry> {
@@ -105,16 +119,19 @@ fn active_profile(conn: &rusqlite::Connection) -> Result<ProviderProfile, String
 
 #[tauri::command]
 pub async fn ai_generate(
+    app: tauri::AppHandle,
     db: State<'_, SettingsDb>,
     prompt: String,
     entries: Vec<FileEntry>,
+    generation_id: String,
 ) -> Result<AiGenerateReport, String> {
     let profile = {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
         active_profile(&conn)?
     };
     let key = settings::get_api_key(&profile.id).unwrap_or_default();
-    ai::generate(&profile, &key, prompt, entries).await
+    let emitter: Arc<dyn ai::AiProgressEmitter> = Arc::new(TauriProgressEmitter(app));
+    ai::generate(&profile, &key, prompt, entries, &generation_id, emitter).await
 }
 
 #[tauri::command]
@@ -203,7 +220,14 @@ pub async fn test_connection(db: State<'_, SettingsDb>, profile_id: String) -> R
         size: 0,
         modified: None,
     }];
-    ai::generate(&profile, &key, "Echo the original name".to_string(), entries)
-        .await
-        .map(|_| "ok".to_string())
+    ai::generate(
+        &profile,
+        &key,
+        "Echo the original name".to_string(),
+        entries,
+        "test-connection",
+        Arc::new(ai::NoopProgressEmitter),
+    )
+    .await
+    .map(|_| "ok".to_string())
 }

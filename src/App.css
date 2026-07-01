@@ -704,6 +704,28 @@ textarea:focus {
   align-items: center;
   gap: 10px;
 }
+.ai-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.ai-progress-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-input);
+  overflow: hidden;
+}
+.ai-progress-fill {
+  height: 100%;
+  background: var(--ai);
+  transition: width 150ms ease-out;
+}
+.ai-progress-error {
+  color: var(--red);
+}
 .step-error {
   color: var(--red);
   background: var(--red-bg);

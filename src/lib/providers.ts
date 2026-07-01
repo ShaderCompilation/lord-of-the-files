@@ -62,7 +62,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     defaultModel: "sonar",
   },
   {
-    label: "Gemini (OpenAI-compat)",
+    label: "Gemini",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
     defaultModel: "gemini-2.5-flash-lite",
   },

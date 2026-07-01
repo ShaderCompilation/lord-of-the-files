@@ -7,6 +7,7 @@
 //! response (fenced in ```json, wrapped in prose, or clean).
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::Duration;
 
 use aisdk::core::{DynamicModel, LanguageModelRequest};
@@ -15,18 +16,33 @@ use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 
 use crate::settings::ProviderProfile;
-use crate::types::{AiGenerateReport, AiResultItem, FileEntry};
+use crate::types::{AiGenerateReport, AiProgressEvent, AiResultItem, FileEntry};
 
 /// Placeholder sent when a profile has no key configured (e.g. local Ollama / LM Studio),
 /// since `aisdk`'s `OpenAICompatible` builder rejects an empty `api_key` even though these
 /// local servers never check the `Authorization` header.
 const NO_KEY_PLACEHOLDER: &str = "not-needed";
 
+/// Seam between `ai::generate`'s per-chunk progress and however the caller wants to surface
+/// it. Exists so unit tests (which run outside a Tauri `AppHandle`) can pass a no-op
+/// implementation instead of needing a live Tauri app.
+pub trait AiProgressEmitter: Send + Sync {
+    fn emit(&self, event: AiProgressEvent);
+}
+
+pub struct NoopProgressEmitter;
+
+impl AiProgressEmitter for NoopProgressEmitter {
+    fn emit(&self, _event: AiProgressEvent) {}
+}
+
 pub async fn generate(
     cfg: &ProviderProfile,
     api_key: &str,
     prompt: String,
     entries: Vec<FileEntry>,
+    generation_id: &str,
+    emitter: Arc<dyn AiProgressEmitter>,
 ) -> Result<AiGenerateReport, String> {
     let key = if api_key.is_empty() {
         NO_KEY_PLACEHOLDER
@@ -63,6 +79,8 @@ pub async fn generate(
         let ids: HashSet<String> = chunk.iter().map(|e| e.id.clone()).collect();
         let exts: HashMap<String, String> =
             chunk.iter().map(|e| (e.id.clone(), e.ext.clone())).collect();
+        let gen_id = generation_id.to_string();
+        let emitter = Arc::clone(&emitter);
         async move {
             log::debug!("ai::generate: chunk {chunk_index} dispatching");
             let outcome = run_chunk(provider, system, user, timeout)
@@ -71,6 +89,19 @@ pub async fn generate(
             if let Err(e) = &outcome {
                 log::warn!("ai::generate: chunk {chunk_index} failed: {e}");
             }
+
+            let chunk_ok = outcome.is_ok();
+            let chunk_error = outcome.as_ref().err().cloned();
+            let chunk_result_count = outcome.as_ref().map(|v| v.len() as u32).unwrap_or(0);
+            emitter.emit(AiProgressEvent {
+                generation_id: gen_id,
+                chunk_index: chunk_index as u32,
+                total_chunks: total_chunks as u32,
+                chunk_ok,
+                chunk_error,
+                chunk_result_count,
+            });
+
             (chunk_index, outcome)
         }
     });
@@ -411,6 +442,8 @@ mod tests {
             "sk-test",
             "rename".to_string(),
             vec![entry("a", "old", "txt")],
+            "test-gen",
+            Arc::new(NoopProgressEmitter),
         )
         .await
         .unwrap();
@@ -432,9 +465,16 @@ mod tests {
         let mut cfg = test_profile(server.uri());
         cfg.chunk_size = 1;
         let entries = vec![entry("a", "old", "txt")];
-        let err = generate(&cfg, "sk-test", "rename".to_string(), entries)
-            .await
-            .unwrap_err();
+        let err = generate(
+            &cfg,
+            "sk-test",
+            "rename".to_string(),
+            entries,
+            "test-gen",
+            Arc::new(NoopProgressEmitter),
+        )
+        .await
+        .unwrap_err();
         assert!(!err.is_empty());
     }
 
@@ -460,9 +500,16 @@ mod tests {
         cfg.chunk_size = 1;
         cfg.concurrency = 1;
         let entries = vec![entry("a", "old-a", "txt"), entry("b", "old-b", "txt")];
-        let report = generate(&cfg, "sk-test", "rename".to_string(), entries)
-            .await
-            .unwrap();
+        let report = generate(
+            &cfg,
+            "sk-test",
+            "rename".to_string(),
+            entries,
+            "test-gen",
+            Arc::new(NoopProgressEmitter),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(report.total_chunks, 2);
         assert_eq!(report.failed_chunks, 1);
@@ -486,9 +533,16 @@ mod tests {
         let mut cfg = test_profile(server.uri());
         cfg.timeout_secs = 1; // `generate` clamps to a 1s minimum, so this is the fastest case
         let entries = vec![entry("a", "old", "txt")];
-        let err = generate(&cfg, "sk-test", "rename".to_string(), entries)
-            .await
-            .unwrap_err();
+        let err = generate(
+            &cfg,
+            "sk-test",
+            "rename".to_string(),
+            entries,
+            "test-gen",
+            Arc::new(NoopProgressEmitter),
+        )
+        .await
+        .unwrap_err();
         assert!(err.contains("Timed out"));
     }
 }

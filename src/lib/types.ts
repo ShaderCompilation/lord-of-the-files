@@ -170,3 +170,12 @@ export interface AiGenerateReport {
   totalChunks: number;
   warning: string | null;
 }
+
+export interface AiProgressEvent {
+  generationId: string;
+  chunkIndex: number;
+  totalChunks: number;
+  chunkOk: boolean;
+  chunkError: string | null;
+  chunkResultCount: number;
+}

@@ -61,8 +61,12 @@ export function previewRedo(opId: string): Promise<FileCheck[]> {
   return invoke("preview_redo", { opId });
 }
 
-export function aiGenerate(prompt: string, entries: FileEntry[]): Promise<AiGenerateReport> {
-  return invoke("ai_generate", { prompt, entries });
+export function aiGenerate(
+  prompt: string,
+  entries: FileEntry[],
+  generationId: string,
+): Promise<AiGenerateReport> {
+  return invoke("ai_generate", { prompt, entries, generationId });
 }
 
 export function getSettings(): Promise<SettingsState> {
