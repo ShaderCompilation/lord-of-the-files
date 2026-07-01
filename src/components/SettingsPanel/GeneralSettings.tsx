@@ -2,6 +2,7 @@ import { appLogDir } from "@tauri-apps/api/path";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import * as s from "../../store";
+import { log } from "../../lib/log";
 import { Button, Checkbox } from "../common";
 
 async function openLogs() {
@@ -9,6 +10,7 @@ async function openLogs() {
     const dir = await appLogDir();
     await revealItemInDir(`${dir}/lord-of-the-files.log`);
   } catch (e) {
+    log.error(`openLogs failed: ${String(e)}`);
     s.setNotice(`Could not open logs: ${String(e)}`);
   }
 }

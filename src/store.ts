@@ -43,12 +43,18 @@ export function toggleExclude(id: string): void {
 
 export async function addPaths(paths: string[]): Promise<void> {
   log.debug(`addPaths: ${paths.length} path(s)`);
-  const scanned = await ipc.scanPaths(paths, recursive(), includeDirs());
-  setFiles((prev) => {
-    const byId = new Map(prev.map((f) => [f.id, f]));
-    for (const f of scanned) byId.set(f.id, f);
-    return [...byId.values()];
-  });
+  try {
+    const scanned = await ipc.scanPaths(paths, recursive(), includeDirs());
+    setFiles((prev) => {
+      const byId = new Map(prev.map((f) => [f.id, f]));
+      for (const f of scanned) byId.set(f.id, f);
+      return [...byId.values()];
+    });
+    log.debug(`addPaths: scanned ${scanned.length} entries, ${files().length} total`);
+  } catch (e) {
+    log.error(`addPaths failed: ${String(e)}`);
+    setNotice(`Could not scan paths: ${String(e)}`);
+  }
 }
 
 /** Open the native file picker and add the selection. */
@@ -183,6 +189,11 @@ export async function runPreview(): Promise<void> {
   try {
     const result = await ipc.computePreview(entries, { steps: pipeline.steps });
     setPreview(result);
+    if (result.stepErrors.length > 0) {
+      for (const err of result.stepErrors) {
+        log.warn(`runPreview step error: stepId=${err.stepId} ${err.message}`);
+      }
+    }
   } catch (e) {
     log.error(`runPreview failed: ${String(e)}`);
     setNotice(`Preview failed: ${String(e)}`);
@@ -244,6 +255,10 @@ export async function applyAll(): Promise<void> {
       }),
     );
     await refreshHistory();
+    for (const f of report.failures) {
+      log.warn(`applyAll failed: ${f.path}: ${f.error}`);
+    }
+    log.info(`applyAll done: renamed=${report.renamed}, failed=${report.failures.length}`);
     const failMsg = report.failures.length ? `, ${report.failures.length} failed` : "";
     setNotice(`Renamed ${report.renamed} file(s)${failMsg}.`);
   } catch (e) {
@@ -366,6 +381,12 @@ export async function confirmPendingAction(): Promise<void> {
     await refreshHistory();
     await fetchOpFiles(pending.opId); // refresh the cached list so the modal shows the new state
     const verb = pending.direction === "undo" ? "Undid" : "Redid";
+    log.info(
+      `${pending.direction}: opId=${pending.opId}, reverted=${r.reverted}, failed=${r.failures.length}`,
+    );
+    for (const f of r.failures) {
+      log.warn(`${pending.direction} failed: ${f.path}: ${f.error}`);
+    }
     const failMsg = r.failures.length ? `, ${r.failures.length} failed` : "";
     setNotice(`${verb} ${r.reverted} rename(s)${failMsg}.`);
   } catch (e) {
@@ -421,6 +442,12 @@ export async function generateAi(stepId: string, prompt: string): Promise<void> 
   }
   const generationId = crypto.randomUUID();
   const profile = activeProfile()!;
+  const prevGenerationId = aiGenerationId().get(stepId);
+  if (prevGenerationId) {
+    log.info(
+      `generateAi: superseding in-flight generation=${prevGenerationId} for step=${stepId}`,
+    );
+  }
   setAiGenerationId((prev) => new Map(prev).set(stepId, generationId));
   setAiStepError((prev) => {
     const next = new Map(prev);
@@ -433,7 +460,9 @@ export async function generateAi(stepId: string, prompt: string): Promise<void> 
   setAiBusy(stepId, true);
   log.info(
     `generateAi: step=${stepId}, generation=${generationId}, ${entries.length} entries, ` +
-      `profile=${profile.id}, model=${profile.model}`,
+      `profile=${profile.id}, model=${profile.model}, hasKey=${profile.hasKey}, ` +
+      `chunkSize=${profile.chunkSize}, concurrency=${profile.concurrency}, ` +
+      `timeoutSecs=${profile.timeoutSecs}, maxLen=${profile.maxLen}`,
   );
   log.trace(`generateAi: prompt=${prompt}`);
 
@@ -441,7 +470,12 @@ export async function generateAi(stepId: string, prompt: string): Promise<void> 
 
   const unlisten = await listen<AiProgressEvent>("ai-generate-progress", (e) => {
     const p = e.payload;
-    if (p.generationId !== generationId || !isLive()) return;
+    if (p.generationId !== generationId || !isLive()) {
+      log.trace(
+        `generateAi progress: ignored stale event generation=${p.generationId} (expected ${generationId})`,
+      );
+      return;
+    }
     log.debug(
       `generateAi progress: chunk ${p.chunkIndex + 1}/${p.totalChunks} ok=${p.chunkOk} ` +
         `results=${p.chunkResultCount}${p.chunkError ? ` err=${p.chunkError}` : ""}`,
@@ -484,6 +518,23 @@ export async function generateAi(stepId: string, prompt: string): Promise<void> 
     if (report.results.length > previewLimit) {
       log.debug(`generateAi rename: … and ${report.results.length - previewLimit} more`);
     }
+    const resultIds = new Set(report.results.map((r) => r.id));
+    const missing = entries.filter((e) => !resultIds.has(e.id));
+    if (missing.length > 0) {
+      log.debug(
+        `generateAi: ${missing.length} file(s) got no suggestion (pipeline keeps original name)`,
+      );
+      const missingLimit = 20;
+      for (const e of missing.slice(0, missingLimit)) {
+        log.debug(`generateAi no suggestion: ${e.id} "${e.stem}"`);
+      }
+      if (missing.length > missingLimit) {
+        log.debug(`generateAi no suggestion: … and ${missing.length - missingLimit} more`);
+      }
+    }
+    const changed = report.results.filter((r) => stems.get(r.id) !== r.newName).length;
+    const unchanged = report.results.length - changed;
+    log.debug(`generateAi quality: ${changed} changed, ${unchanged} unchanged name(s)`);
     if (report.warning) {
       setAiStepError((prev) => new Map(prev).set(stepId, report.warning!));
     }
@@ -553,6 +604,7 @@ export async function loadSettings(): Promise<void> {
 export async function upsertProfile(profile: ProviderProfile): Promise<void> {
   try {
     await ipc.upsertProfile(profile);
+    log.debug(`upsertProfile: id=${profile.id}, label=${profile.label}, model=${profile.model}`);
     await loadSettings();
   } catch (e) {
     log.error(`upsertProfile failed: ${String(e)}`);
@@ -563,6 +615,7 @@ export async function upsertProfile(profile: ProviderProfile): Promise<void> {
 export async function deleteProfile(id: string): Promise<void> {
   try {
     await ipc.deleteProfile(id);
+    log.debug(`deleteProfile: id=${id}`);
     await loadSettings();
   } catch (e) {
     log.error(`deleteProfile failed: ${String(e)}`);
@@ -573,6 +626,7 @@ export async function deleteProfile(id: string): Promise<void> {
 export async function setActiveProfile(id: string): Promise<void> {
   try {
     await ipc.setActiveProfile(id);
+    log.debug(`setActiveProfile: id=${id}`);
     await loadSettings();
   } catch (e) {
     log.error(`setActiveProfile failed: ${String(e)}`);
@@ -593,6 +647,7 @@ export async function saveApiKey(profileId: string, key: string): Promise<void> 
 }
 
 export async function clearApiKey(profileId: string): Promise<void> {
+  log.debug(`clearApiKey: profileId=${profileId}`);
   try {
     await ipc.clearApiKey(profileId);
     await loadSettings();
@@ -602,13 +657,22 @@ export async function clearApiKey(profileId: string): Promise<void> {
   }
 }
 
-export function testConnection(profileId: string): Promise<string> {
-  return ipc.testConnection(profileId);
+export async function testConnection(profileId: string): Promise<string> {
+  log.info(`testConnection: profileId=${profileId}`);
+  try {
+    const result = await ipc.testConnection(profileId);
+    log.info(`testConnection: profileId=${profileId} ok`);
+    return result;
+  } catch (e) {
+    log.warn(`testConnection: profileId=${profileId} failed: ${String(e)}`);
+    throw e;
+  }
 }
 
 export async function setDebugLogging(enabled: boolean): Promise<void> {
   try {
     await ipc.setDebugLogging(enabled);
+    log.info(`setDebugLogging: ${enabled ? "enabled" : "disabled"}`);
     await loadSettings();
   } catch (e) {
     log.error(`setDebugLogging failed: ${String(e)}`);

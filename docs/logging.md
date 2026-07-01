@@ -106,11 +106,21 @@ Follow existing thin-wrapper style; add log calls, don't restructure.
   Log `has_key`/`profile_id` only. This applies in `ai.rs`, `commands.rs`, `settings.rs`.
 
 ### Frontend AI instrumentation (`store.ts`)
-- **`generateAi`**: `info` on start (step id, generation id, entry count, profile, model) and
-  on success (result count, failed chunk tally); `warn` on partial failure; `debug` per-chunk
-  progress events and per-file old→new renames (first 50); `trace` for full user prompt;
-  `debug` when skipping or discarding cancelled/stale generations.
+- **`generateAi`**: `info` on start (step id, generation id, entry count, profile, model,
+  `hasKey`, chunk/concurrency/timeout/maxLen config) and on success (result count, failed
+  chunk tally); `warn` on partial failure; `debug` per-chunk progress events, per-file
+  old→new renames (first 50), files with no suggestion, changed vs unchanged tally;
+  `trace` for full user prompt and ignored stale progress events; `info` when superseding
+  an in-flight generation; `debug` when skipping or discarding cancelled/stale generations.
 - **`cancelAi`**: `info` with step id and generation id when known.
+- **`testConnection`**: `info` on start/success, `warn` on failure.
+- **`setActiveProfile` / `upsertProfile` / `deleteProfile` / `clearApiKey`**: `debug` on
+  success (profile id only — never log keys).
+- **`setDebugLogging`**: `info` when toggled.
+- **`runPreview`**: `warn` per pipeline step error returned by the engine.
+- **`applyAll` / undo-redo confirm**: `info` on completion with counts, `warn` per failure.
+- **`addPaths`**: `debug` on scan, `error` on failure.
+- **`GeneralSettings` open logs**: `error` on failure.
 
 ### `Cargo.toml`
 - Add `tauri-plugin-log = "2"` and `log = "0.4"` (needed for the `log::*!` macros / `Metadata`).
