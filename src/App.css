@@ -375,6 +375,10 @@ textarea:focus {
   color: var(--muted);
   border: none;
 }
+.badge-warn {
+  color: var(--yellow);
+  border-color: var(--yellow);
+}
 
 /* ---- Pipeline ---- */
 .pipeline {
@@ -722,7 +726,7 @@ textarea:focus {
   top: 0;
   right: 0;
   height: 100vh;
-  width: 380px;
+  width: 460px;
   background: var(--bg-elevated);
   border-left: 1px solid var(--border);
   display: flex;
@@ -754,13 +758,98 @@ textarea:focus {
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
 }
+.history-row {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.history-row:hover .history-summary {
+  text-decoration: underline;
+}
 .history-info {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 .history-summary {
   font-weight: 500;
+}
+
+/* ---- History operation detail modal ---- */
+.history-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 640px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 96px);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 20;
+}
+.history-modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.history-file-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.history-modal-list {
+  max-height: 50vh;
+  padding: 2px;
+}
+.history-file-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.history-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+.history-errors {
+  list-style: none;
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--red-bg);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--red);
+  max-height: 120px;
+  overflow-y: auto;
+}
+.history-error-row {
+  padding: 2px 0;
 }
 
 /* ---- Settings panel ---- */

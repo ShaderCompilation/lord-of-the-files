@@ -6,11 +6,13 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AiGenerateReport,
   ApplyReport,
+  FileCheck,
   FileEntry,
   Operation,
   Pipeline,
   PreviewResult,
   ProviderProfile,
+  RenameEntry,
   RenameItem,
   SettingsState,
   UndoReport,
@@ -45,6 +47,18 @@ export function undoOperation(opId: string): Promise<UndoReport> {
 
 export function redoOperation(opId: string): Promise<UndoReport> {
   return invoke("redo_operation", { opId });
+}
+
+export function getOperationFiles(opId: string): Promise<RenameEntry[]> {
+  return invoke("get_operation_files", { opId });
+}
+
+export function previewUndo(opId: string): Promise<FileCheck[]> {
+  return invoke("preview_undo", { opId });
+}
+
+export function previewRedo(opId: string): Promise<FileCheck[]> {
+  return invoke("preview_redo", { opId });
 }
 
 export function aiGenerate(prompt: string, entries: FileEntry[]): Promise<AiGenerateReport> {

@@ -128,7 +128,21 @@ export interface Operation {
   createdAt: string;
   summary: string;
   itemCount: number;
+  status: "applied" | "undone" | "partial";
+}
+
+export interface RenameEntry {
+  oldPath: string;
+  newPath: string;
   status: "applied" | "undone";
+}
+
+export type CheckStatus = "ok" | "missing" | "would-overwrite";
+
+export interface FileCheck {
+  oldPath: string;
+  newPath: string;
+  status: CheckStatus;
 }
 
 // BYOK provider settings (see src-tauri/src/settings.rs).

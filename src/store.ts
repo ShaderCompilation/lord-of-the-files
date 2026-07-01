@@ -10,10 +10,13 @@ import { log } from "./lib/log";
 import { defaultStep } from "./lib/steps";
 import type {
   AiResultItem,
+  FileCheck,
+  Failure,
   FileEntry,
   Operation,
   PreviewResult,
   ProviderProfile,
+  RenameEntry,
   SettingsState,
   StepConfig,
   StepType,
@@ -247,27 +250,128 @@ export async function applyAll(): Promise<void> {
   }
 }
 
-export async function undo(opId: string): Promise<void> {
-  log.debug(`undo: ${opId}`);
+// ---- History: detail modal (per-op file list, opened by clicking a history row) -------
+
+const [historyDetailOpId, setHistoryDetailOpId] = createSignal<string | null>(null);
+const [opFiles, setOpFiles] = createSignal<Map<string, RenameEntry[]>>(new Map());
+const [opFilesLoading, setOpFilesLoading] = createSignal<Set<string>>(new Set());
+export { historyDetailOpId, opFiles };
+
+export function isOpFilesLoading(opId: string): boolean {
+  return opFilesLoading().has(opId);
+}
+
+async function fetchOpFiles(opId: string): Promise<void> {
+  setOpFilesLoading((prev) => new Set(prev).add(opId));
   try {
-    const r = await ipc.undoOperation(opId);
-    await refreshHistory();
-    setNotice(`Undid ${r.reverted} rename(s). Re-add files to continue editing.`);
+    const files = await ipc.getOperationFiles(opId);
+    setOpFiles((prev) => new Map(prev).set(opId, files));
   } catch (e) {
-    log.error(`undo failed: ${String(e)}`);
-    setNotice(`Undo failed: ${String(e)}`);
+    log.error(`fetchOpFiles failed: ${String(e)}`);
+    setNotice(`Could not load file list: ${String(e)}`);
+  } finally {
+    setOpFilesLoading((prev) => {
+      const next = new Set(prev);
+      next.delete(opId);
+      return next;
+    });
   }
 }
 
-export async function redo(opId: string): Promise<void> {
-  log.debug(`redo: ${opId}`);
+export function openHistoryDetail(opId: string): void {
+  setHistoryDetailOpId(opId);
+  if (!opFiles().has(opId)) void fetchOpFiles(opId);
+}
+
+export function closeHistoryDetail(): void {
+  setHistoryDetailOpId(null);
+  setPendingAction(null);
+}
+
+// ---- History: confirm-before-undo/redo (live filesystem dry-run preview) --------------
+
+export interface PendingAction {
+  opId: string;
+  direction: "undo" | "redo";
+  checks: FileCheck[];
+}
+const [pendingAction, setPendingAction] = createSignal<PendingAction | null>(null);
+const [pendingLoading, setPendingLoading] = createSignal(false); // dry-run fetch in flight
+const [confirmBusy, setConfirmBusy] = createSignal(false); // actual undo/redo in flight
+const [opErrors, setOpErrors] = createSignal<Map<string, Failure[]>>(new Map());
+export { pendingAction, pendingLoading, confirmBusy, opErrors };
+
+export async function requestUndo(opId: string): Promise<void> {
+  if (pendingLoading() || confirmBusy()) return;
+  log.debug(`requestUndo: ${opId}`);
+  openHistoryDetail(opId); // also warms the file-list cache, used if the user cancels
+  setPendingLoading(true);
   try {
-    const r = await ipc.redoOperation(opId);
-    await refreshHistory();
-    setNotice(`Redid ${r.reverted} rename(s).`);
+    const checks = await ipc.previewUndo(opId);
+    setPendingAction({ opId, direction: "undo", checks });
   } catch (e) {
-    log.error(`redo failed: ${String(e)}`);
-    setNotice(`Redo failed: ${String(e)}`);
+    log.error(`previewUndo failed: ${String(e)}`);
+    setNotice(`Could not preview undo: ${String(e)}`);
+  } finally {
+    setPendingLoading(false);
+  }
+}
+
+export async function requestRedo(opId: string): Promise<void> {
+  if (pendingLoading() || confirmBusy()) return;
+  log.debug(`requestRedo: ${opId}`);
+  openHistoryDetail(opId); // also warms the file-list cache, used if the user cancels
+  setPendingLoading(true);
+  try {
+    const checks = await ipc.previewRedo(opId);
+    setPendingAction({ opId, direction: "redo", checks });
+  } catch (e) {
+    log.error(`previewRedo failed: ${String(e)}`);
+    setNotice(`Could not preview redo: ${String(e)}`);
+  } finally {
+    setPendingLoading(false);
+  }
+}
+
+export function cancelPendingAction(): void {
+  setPendingAction(null);
+}
+
+export async function confirmPendingAction(): Promise<void> {
+  const pending = pendingAction();
+  if (!pending || confirmBusy()) return;
+  setConfirmBusy(true);
+  try {
+    const r =
+      pending.direction === "undo"
+        ? await ipc.undoOperation(pending.opId)
+        : await ipc.redoOperation(pending.opId);
+
+    // The dry-run already told the user which files were missing/conflicting; only
+    // surface failures that weren't already predicted, so the same problem isn't
+    // reported twice.
+    const expected = new Set(
+      pending.checks.filter((c) => c.status !== "ok").map((c) => c.oldPath),
+    );
+    const unexpected = r.failures.filter((f) => !expected.has(f.path));
+    setOpErrors((prev) => {
+      const next = new Map(prev);
+      if (unexpected.length) next.set(pending.opId, unexpected);
+      else next.delete(pending.opId);
+      return next;
+    });
+
+    await refreshHistory();
+    await fetchOpFiles(pending.opId); // refresh the cached list so the modal shows the new state
+    const verb = pending.direction === "undo" ? "Undid" : "Redid";
+    const failMsg = r.failures.length ? `, ${r.failures.length} failed` : "";
+    setNotice(`${verb} ${r.reverted} rename(s)${failMsg}.`);
+  } catch (e) {
+    log.error(`confirmPendingAction failed: ${String(e)}`);
+    setNotice(`Action failed: ${String(e)}`);
+  } finally {
+    setConfirmBusy(false);
+    setPendingAction(null);
   }
 }
 

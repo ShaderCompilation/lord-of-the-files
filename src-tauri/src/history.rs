@@ -50,7 +50,33 @@ pub struct Operation {
     pub created_at: String,
     pub summary: String,
     pub item_count: i64,
+    pub status: String, // "applied" | "undone" | "partial", derived from renames.status
+}
+
+/// Per-file detail of a past operation, including its persisted per-row status.
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameEntry {
+    pub old_path: String,
+    pub new_path: String,
     pub status: String, // "applied" | "undone"
+}
+
+/// Result of a filesystem dry-run for one file in a prospective undo/redo.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum CheckStatus {
+    Ok,
+    Missing,
+    WouldOverwrite,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct FileCheck {
+    pub old_path: String,
+    pub new_path: String,
+    pub status: CheckStatus,
 }
 
 pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
@@ -67,10 +93,32 @@ pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
             ord INTEGER NOT NULL,
             old_path TEXT NOT NULL,
             new_path TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'applied',
             FOREIGN KEY (op_id) REFERENCES operations(id)
         );
         CREATE INDEX IF NOT EXISTS idx_renames_op ON renames(op_id);",
     )?;
+    migrate_add_rename_status(conn)?;
+    Ok(())
+}
+
+/// Adds `renames.status` to installs from before per-file status tracking existed.
+/// `CREATE TABLE IF NOT EXISTS` above is a no-op against pre-existing tables, so this
+/// explicit check+backfill is required. Idempotent: a no-op once the column exists.
+fn migrate_add_rename_status(conn: &Connection) -> rusqlite::Result<()> {
+    let has_status = conn
+        .prepare("PRAGMA table_info(renames)")?
+        .query_map([], |r| r.get::<_, String>(1))?
+        .filter_map(Result::ok)
+        .any(|name| name == "status");
+    if !has_status {
+        conn.execute_batch(
+            "ALTER TABLE renames ADD COLUMN status TEXT NOT NULL DEFAULT 'applied';
+             UPDATE renames SET status = (
+                 SELECT operations.status FROM operations WHERE operations.id = renames.op_id
+             );",
+        )?;
+    }
     Ok(())
 }
 
@@ -164,8 +212,17 @@ pub fn apply_rename(conn: &Connection, items: &[RenameItem]) -> ApplyReport {
 
 pub fn list_operations(conn: &Connection) -> rusqlite::Result<Vec<Operation>> {
     let mut stmt = conn.prepare(
-        "SELECT id, created_at, summary, item_count, status FROM operations
-         ORDER BY created_at DESC",
+        "SELECT o.id, o.created_at, o.summary, o.item_count,
+            CASE
+                WHEN COUNT(r.status) = 0 THEN o.status
+                WHEN SUM(CASE WHEN r.status = 'applied' THEN 1 ELSE 0 END) = COUNT(r.status) THEN 'applied'
+                WHEN SUM(CASE WHEN r.status = 'undone' THEN 1 ELSE 0 END) = COUNT(r.status) THEN 'undone'
+                ELSE 'partial'
+            END AS derived_status
+         FROM operations o
+         LEFT JOIN renames r ON r.op_id = o.id
+         GROUP BY o.id
+         ORDER BY o.created_at DESC",
     )?;
     let rows = stmt
         .query_map([], |r| {
@@ -175,6 +232,23 @@ pub fn list_operations(conn: &Connection) -> rusqlite::Result<Vec<Operation>> {
                 summary: r.get(2)?,
                 item_count: r.get(3)?,
                 status: r.get(4)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// Per-file detail of an operation, for the History panel's expandable file list.
+pub fn get_operation_files(conn: &Connection, op_id: &str) -> rusqlite::Result<Vec<RenameEntry>> {
+    let mut stmt = conn.prepare(
+        "SELECT old_path, new_path, status FROM renames WHERE op_id = ?1 ORDER BY ord",
+    )?;
+    let rows = stmt
+        .query_map(params![op_id], |r| {
+            Ok(RenameEntry {
+                old_path: r.get(0)?,
+                new_path: r.get(1)?,
+                status: r.get(2)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -201,10 +275,14 @@ pub fn undo_operation(conn: &Connection, op_id: &str) -> rusqlite::Result<UndoRe
         .map(|(old, new)| (new, old))
         .collect();
     let (done, failures) = move_batch(&moves);
-    conn.execute(
-        "UPDATE operations SET status = 'undone' WHERE id = ?1",
-        params![op_id],
-    )?;
+    // `done` entries are (from, to) = (new_path, old_path); only rows that actually
+    // moved get marked undone. Rows in `failures` keep whatever status they had.
+    for (from, to) in &done {
+        conn.execute(
+            "UPDATE renames SET status = 'undone' WHERE op_id = ?1 AND old_path = ?2 AND new_path = ?3",
+            params![op_id, to, from],
+        )?;
+    }
     Ok(UndoReport {
         reverted: done.len(),
         failures,
@@ -216,14 +294,62 @@ pub fn redo_operation(conn: &Connection, op_id: &str) -> rusqlite::Result<UndoRe
     let pairs = load_pairs(conn, op_id)?;
     let moves: Vec<(String, String)> = pairs;
     let (done, failures) = move_batch(&moves);
-    conn.execute(
-        "UPDATE operations SET status = 'applied' WHERE id = ?1",
-        params![op_id],
-    )?;
+    for (from, to) in &done {
+        conn.execute(
+            "UPDATE renames SET status = 'applied' WHERE op_id = ?1 AND old_path = ?2 AND new_path = ?3",
+            params![op_id, from, to],
+        )?;
+    }
     Ok(UndoReport {
         reverted: done.len(),
         failures,
     })
+}
+
+/// Dry-run: check whether each move in `moves` (already direction-adjusted) would
+/// succeed, without touching the filesystem. A destination is only flagged as an
+/// overwrite conflict if it's not itself a source elsewhere in this same batch —
+/// intra-batch swaps/chains rely on move_batch's temp-staging to move safely.
+fn dry_run(moves: &[(String, String)]) -> Vec<FileCheck> {
+    use std::collections::HashSet;
+    let sources: HashSet<&str> = moves.iter().map(|(from, _)| from.as_str()).collect();
+
+    moves
+        .iter()
+        .map(|(from, to)| {
+            let status = if from == to {
+                CheckStatus::Ok
+            } else if !Path::new(from).exists() {
+                CheckStatus::Missing
+            } else if Path::new(to).exists() && !sources.contains(to.as_str()) {
+                CheckStatus::WouldOverwrite
+            } else {
+                CheckStatus::Ok
+            };
+            FileCheck {
+                old_path: from.clone(),
+                new_path: to.clone(),
+                status,
+            }
+        })
+        .collect()
+}
+
+/// Preview what `undo_operation` would do to the filesystem right now, without doing it.
+pub fn preview_undo(conn: &Connection, op_id: &str) -> rusqlite::Result<Vec<FileCheck>> {
+    let pairs = load_pairs(conn, op_id)?;
+    let moves: Vec<(String, String)> = pairs
+        .into_iter()
+        .rev()
+        .map(|(old, new)| (new, old))
+        .collect();
+    Ok(dry_run(&moves))
+}
+
+/// Preview what `redo_operation` would do to the filesystem right now, without doing it.
+pub fn preview_redo(conn: &Connection, op_id: &str) -> rusqlite::Result<Vec<FileCheck>> {
+    let pairs = load_pairs(conn, op_id)?;
+    Ok(dry_run(&pairs))
 }
 
 #[cfg(test)]
@@ -288,5 +414,265 @@ mod tests {
         assert!(report.failures.is_empty());
         assert_eq!(std::fs::read_to_string(&a).unwrap(), "B");
         assert_eq!(std::fs::read_to_string(&b).unwrap(), "A");
+    }
+
+    #[test]
+    fn migration_adds_status_column_to_existing_db() {
+        let conn = Connection::open_in_memory().unwrap();
+        // Simulate a pre-migration install: renames table has no status column.
+        conn.execute_batch(
+            "CREATE TABLE operations (
+                id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                item_count INTEGER NOT NULL,
+                status TEXT NOT NULL
+            );
+            CREATE TABLE renames (
+                op_id TEXT NOT NULL,
+                ord INTEGER NOT NULL,
+                old_path TEXT NOT NULL,
+                new_path TEXT NOT NULL,
+                FOREIGN KEY (op_id) REFERENCES operations(id)
+            );
+            INSERT INTO operations (id, created_at, summary, item_count, status)
+                VALUES ('op1', '2024-01-01T00:00:00Z', 'Renamed 1 file(s)', 1, 'undone');
+            INSERT INTO renames (op_id, ord, old_path, new_path) VALUES ('op1', 0, '/a', '/b');",
+        )
+        .unwrap();
+
+        init_schema(&conn).unwrap();
+
+        let has_status = conn
+            .prepare("PRAGMA table_info(renames)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|name| name == "status");
+        assert!(has_status);
+
+        let status: String = conn
+            .query_row("SELECT status FROM renames WHERE op_id = 'op1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(status, "undone");
+
+        // Idempotent: running init_schema again doesn't error or re-ALTER.
+        init_schema(&conn).unwrap();
+    }
+
+    #[test]
+    fn partial_failure_marks_only_succeeded_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        let b = dir.path().join("b.txt");
+        let c = dir.path().join("c.txt");
+        std::fs::write(&a, "A").unwrap();
+        std::fs::write(&b, "B").unwrap();
+        std::fs::write(&c, "C").unwrap();
+        let conn = mem_db();
+
+        let items = vec![
+            RenameItem {
+                old_path: a.to_string_lossy().to_string(),
+                new_name: "a2.txt".to_string(),
+            },
+            RenameItem {
+                old_path: b.to_string_lossy().to_string(),
+                new_name: "b2.txt".to_string(),
+            },
+            RenameItem {
+                old_path: c.to_string_lossy().to_string(),
+                new_name: "c2.txt".to_string(),
+            },
+        ];
+        let report = apply_rename(&conn, &items);
+        assert_eq!(report.renamed, 3);
+        let op_id = report.operation_id.unwrap();
+
+        // Simulate b2.txt being moved/deleted outside the app before undo.
+        std::fs::remove_file(dir.path().join("b2.txt")).unwrap();
+
+        let u = undo_operation(&conn, &op_id).unwrap();
+        assert_eq!(u.reverted, 2);
+        assert_eq!(u.failures.len(), 1);
+        assert_eq!(
+            u.failures[0].path,
+            dir.path().join("b2.txt").to_string_lossy().to_string()
+        );
+
+        let files = get_operation_files(&conn, &op_id).unwrap();
+        let status_for = |new_suffix: &str| {
+            files
+                .iter()
+                .find(|f| f.new_path.ends_with(new_suffix))
+                .unwrap()
+                .status
+                .clone()
+        };
+        assert_eq!(status_for("a2.txt"), "undone");
+        assert_eq!(status_for("c2.txt"), "undone");
+        assert_eq!(status_for("b2.txt"), "applied"); // untouched: kept its prior status
+    }
+
+    #[test]
+    fn aggregate_status_reflects_mixed_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        let b = dir.path().join("b.txt");
+        std::fs::write(&a, "A").unwrap();
+        std::fs::write(&b, "B").unwrap();
+        let conn = mem_db();
+
+        let items = vec![
+            RenameItem {
+                old_path: a.to_string_lossy().to_string(),
+                new_name: "a2.txt".to_string(),
+            },
+            RenameItem {
+                old_path: b.to_string_lossy().to_string(),
+                new_name: "b2.txt".to_string(),
+            },
+        ];
+        let report = apply_rename(&conn, &items);
+        let op_id = report.operation_id.unwrap();
+
+        let ops = list_operations(&conn).unwrap();
+        assert_eq!(
+            ops.iter().find(|o| o.id == op_id).unwrap().status,
+            "applied"
+        );
+
+        // Delete one renamed file, then undo: one row reverts, one fails => partial.
+        std::fs::remove_file(dir.path().join("b2.txt")).unwrap();
+        let u = undo_operation(&conn, &op_id).unwrap();
+        assert_eq!(u.reverted, 1);
+        assert_eq!(u.failures.len(), 1);
+
+        let ops = list_operations(&conn).unwrap();
+        assert_eq!(
+            ops.iter().find(|o| o.id == op_id).unwrap().status,
+            "partial"
+        );
+
+        // A separate, fully-undone batch aggregates to "undone".
+        let c = dir.path().join("c.txt");
+        std::fs::write(&c, "C").unwrap();
+        let items2 = vec![RenameItem {
+            old_path: c.to_string_lossy().to_string(),
+            new_name: "c2.txt".to_string(),
+        }];
+        let report2 = apply_rename(&conn, &items2);
+        let op_id2 = report2.operation_id.unwrap();
+        undo_operation(&conn, &op_id2).unwrap();
+
+        let ops = list_operations(&conn).unwrap();
+        assert_eq!(
+            ops.iter().find(|o| o.id == op_id2).unwrap().status,
+            "undone"
+        );
+    }
+
+    #[test]
+    fn preview_undo_all_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        std::fs::write(&a, "A").unwrap();
+        let conn = mem_db();
+        let items = vec![RenameItem {
+            old_path: a.to_string_lossy().to_string(),
+            new_name: "b.txt".to_string(),
+        }];
+        let report = apply_rename(&conn, &items);
+        let op_id = report.operation_id.unwrap();
+
+        let checks = preview_undo(&conn, &op_id).unwrap();
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, CheckStatus::Ok);
+    }
+
+    #[test]
+    fn preview_undo_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        std::fs::write(&a, "A").unwrap();
+        let conn = mem_db();
+        let items = vec![RenameItem {
+            old_path: a.to_string_lossy().to_string(),
+            new_name: "b.txt".to_string(),
+        }];
+        let report = apply_rename(&conn, &items);
+        let op_id = report.operation_id.unwrap();
+
+        std::fs::remove_file(dir.path().join("b.txt")).unwrap();
+        let checks = preview_undo(&conn, &op_id).unwrap();
+        assert_eq!(checks[0].status, CheckStatus::Missing);
+    }
+
+    #[test]
+    fn preview_undo_would_overwrite_external_collision() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        std::fs::write(&a, "A").unwrap();
+        let conn = mem_db();
+        let items = vec![RenameItem {
+            old_path: a.to_string_lossy().to_string(),
+            new_name: "b.txt".to_string(),
+        }];
+        let report = apply_rename(&conn, &items);
+        let op_id = report.operation_id.unwrap();
+
+        // Undo would move b.txt back to a.txt, but an unrelated a.txt now exists.
+        std::fs::write(&a, "new content").unwrap();
+        let checks = preview_undo(&conn, &op_id).unwrap();
+        assert_eq!(checks[0].status, CheckStatus::WouldOverwrite);
+    }
+
+    #[test]
+    fn preview_undo_swap_does_not_false_positive() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        let b = dir.path().join("b.txt");
+        std::fs::write(&a, "A").unwrap();
+        std::fs::write(&b, "B").unwrap();
+        let conn = mem_db();
+
+        let items = vec![
+            RenameItem {
+                old_path: a.to_string_lossy().to_string(),
+                new_name: "b.txt".to_string(),
+            },
+            RenameItem {
+                old_path: b.to_string_lossy().to_string(),
+                new_name: "a.txt".to_string(),
+            },
+        ];
+        let report = apply_rename(&conn, &items);
+        let op_id = report.operation_id.unwrap();
+
+        let checks = preview_undo(&conn, &op_id).unwrap();
+        assert_eq!(checks.len(), 2);
+        assert!(checks.iter().all(|c| c.status == CheckStatus::Ok));
+    }
+
+    #[test]
+    fn preview_redo_mirrors_direction() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        std::fs::write(&a, "A").unwrap();
+        let conn = mem_db();
+        let items = vec![RenameItem {
+            old_path: a.to_string_lossy().to_string(),
+            new_name: "b.txt".to_string(),
+        }];
+        let report = apply_rename(&conn, &items);
+        let op_id = report.operation_id.unwrap();
+
+        undo_operation(&conn, &op_id).unwrap();
+        let checks = preview_redo(&conn, &op_id).unwrap();
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, CheckStatus::Ok);
     }
 }

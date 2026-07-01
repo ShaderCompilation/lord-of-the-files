@@ -6,7 +6,9 @@ use tauri::State;
 use crate::ai;
 use crate::engine;
 use crate::fs_scan;
-use crate::history::{self, ApplyReport, HistoryDb, Operation, RenameItem, UndoReport};
+use crate::history::{
+    self, ApplyReport, FileCheck, HistoryDb, Operation, RenameEntry, RenameItem, UndoReport,
+};
 use crate::settings::{self, ProviderProfile, SettingsDb, SettingsState};
 use crate::types::{AiGenerateReport, FileEntry, Pipeline, PreviewResult};
 
@@ -66,6 +68,24 @@ pub fn redo_operation(db: State<HistoryDb>, op_id: String) -> Result<UndoReport,
         log::warn!("redo_operation failed for {}: {}", f.path, f.error);
     }
     Ok(report)
+}
+
+#[tauri::command]
+pub fn get_operation_files(db: State<HistoryDb>, op_id: String) -> Result<Vec<RenameEntry>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    history::get_operation_files(&conn, &op_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn preview_undo(db: State<HistoryDb>, op_id: String) -> Result<Vec<FileCheck>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    history::preview_undo(&conn, &op_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn preview_redo(db: State<HistoryDb>, op_id: String) -> Result<Vec<FileCheck>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    history::preview_redo(&conn, &op_id).map_err(|e| e.to_string())
 }
 
 /// Looks up the active profile, erroring with a message pointing at Settings when none is

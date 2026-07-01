@@ -1,7 +1,9 @@
 import { For, Show } from "solid-js";
 
 import * as s from "../store";
-import { Button, Overlay } from "./common";
+import { opBadgeVariant, opStatusLabel } from "../lib/historyStatus";
+import { Badge, Button, Overlay } from "./common";
+import { HistoryDetailModal } from "./HistoryDetailModal";
 
 export function HistoryPanel(props: { open: boolean; onClose: () => void }) {
   return (
@@ -20,32 +22,55 @@ export function HistoryPanel(props: { open: boolean; onClose: () => void }) {
         >
           <ul class="history-list">
             <For each={s.history()}>
-              {(op) => (
-                <li class="history-item">
-                  <div class="history-info">
-                    <span class="history-summary">{op.summary}</span>
-                    <span class="muted small">
-                      {new Date(op.createdAt).toLocaleString()} · {op.status}
-                    </span>
-                  </div>
-                  <Show
-                    when={op.status === "applied"}
-                    fallback={
-                      <Button variant="ghost" small onClick={() => s.redo(op.id)}>
-                        Redo
+              {(op) => {
+                const busy = () => s.pendingLoading() || s.confirmBusy();
+                return (
+                  <li class="history-item">
+                    <button
+                      type="button"
+                      class="history-row"
+                      onClick={() => s.openHistoryDetail(op.id)}
+                    >
+                      <div class="history-info">
+                        <span class="history-summary">{op.summary}</span>
+                        <span class="muted small">
+                          {new Date(op.createdAt).toLocaleString()} ·{" "}
+                          <Badge variant={opBadgeVariant(op.status)}>
+                            {opStatusLabel(op.status)}
+                          </Badge>
+                        </span>
+                      </div>
+                    </button>
+                    <Show
+                      when={op.status !== "undone"}
+                      fallback={
+                        <Button
+                          variant="ghost"
+                          small
+                          disabled={busy()}
+                          onClick={() => s.requestRedo(op.id)}
+                        >
+                          Redo
+                        </Button>
+                      }
+                    >
+                      <Button
+                        variant="ghost"
+                        small
+                        disabled={busy()}
+                        onClick={() => s.requestUndo(op.id)}
+                      >
+                        Undo
                       </Button>
-                    }
-                  >
-                    <Button variant="ghost" small onClick={() => s.undo(op.id)}>
-                      Undo
-                    </Button>
-                  </Show>
-                </li>
-              )}
+                    </Show>
+                  </li>
+                );
+              }}
             </For>
           </ul>
         </Show>
       </aside>
+      <HistoryDetailModal />
     </Show>
   );
 }

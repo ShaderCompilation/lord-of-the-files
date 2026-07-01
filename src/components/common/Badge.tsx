@@ -1,7 +1,7 @@
 import type { JSX } from "solid-js";
 
 export function Badge(props: {
-  variant?: "changed" | "conflict" | "invalid" | "unchanged";
+  variant?: "changed" | "conflict" | "invalid" | "unchanged" | "warn";
   title?: string;
   children: JSX.Element;
 }) {
