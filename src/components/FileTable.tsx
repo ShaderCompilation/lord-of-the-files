@@ -49,16 +49,14 @@ export function FileTable() {
         when={s.files().length > 0}
         fallback={
           <div class="dropzone">
-            <div class="dropzone-icon">🗂️</div>
-            <div class="dropzone-step">Step 1</div>
             <p class="dropzone-title">Drop files or folders here</p>
             <p class="muted">or</p>
             <Button variant="primary" onClick={s.pickFiles}>
               Add files
             </Button>
-            <p class="muted small dropzone-hint">
-              Then build a recipe or use AI&nbsp;✦ on the right.
-            </p>
+            <Button variant="primary" onClick={s.pickFolder}>
+              Add folders
+            </Button>
           </div>
         }
       >

@@ -72,8 +72,7 @@ export function PipelineEditor() {
         when={hasFiles()}
         fallback={
           <div class="pipeline-locked">
-            <p>Add files first.</p>
-            <p class="muted small">Then build a recipe or use AI&nbsp;✦ to transform their names.</p>
+            <p>Add files first</p>
           </div>
         }
       >

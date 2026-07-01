@@ -63,66 +63,6 @@ html,
   flex: 1;
 }
 
-/* Add-files split button + popover */
-.add-control {
-  position: relative;
-  display: flex;
-}
-.add-main {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
-.add-caret {
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-  border-left-color: rgba(255, 255, 255, 0.25);
-  padding-left: 8px;
-  padding-right: 8px;
-}
-.menu-backdrop {
-  position: fixed;
-  inset: 0;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  padding: 0;
-  cursor: default;
-  z-index: 20;
-}
-.add-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 21;
-  min-width: 200px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-}
-.add-menu-item {
-  justify-content: flex-start;
-  text-align: left;
-  width: 100%;
-}
-.add-menu-sep {
-  height: 1px;
-  background: var(--border);
-  margin: 2px 0;
-}
-.add-menu-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 0 2px;
-}
-
 .conflict-pill {
   color: var(--red);
   border-color: var(--red);

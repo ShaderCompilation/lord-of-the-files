@@ -1,11 +1,12 @@
-import { Show, createMemo, createSignal } from "solid-js";
+import { Show, createMemo } from "solid-js";
 
 import * as s from "../store";
 import { Button, Checkbox } from "./common";
 
-export function Toolbar(props: { onToggleHistory: () => void; onToggleSettings: () => void }) {
-  const [addOpen, setAddOpen] = createSignal(false);
-
+export function Toolbar(props: {
+  onToggleHistory: () => void;
+  onToggleSettings: () => void;
+}) {
   const hasFiles = () => s.files().length > 0;
   const applicable = createMemo(() => s.applicableRows().length);
   const conflicts = createMemo(() => s.previewCounts().conflict);
@@ -14,48 +15,28 @@ export function Toolbar(props: { onToggleHistory: () => void; onToggleSettings: 
 
   return (
     <header class="toolbar">
-      <div class="brand">🗂️ Lord of the Files</div>
+      <div class="brand">Lord of the Files</div>
 
-      <div class="add-control">
-        <Button variant="primary" class="add-main" onClick={s.pickFiles}>
+      <div class="toolbar-group">
+        <Button variant="primary" onClick={s.pickFiles}>
           Add files
         </Button>
-        <Button
-          variant="primary"
-          class="add-caret"
-          onClick={() => setAddOpen((v) => !v)}
-          title="More add options"
-        >
-          ▾
+        <Button variant="primary" onClick={() => void s.pickFolder()}>
+          Add folder…
         </Button>
-        <Show when={addOpen()}>
-          <button class="menu-backdrop" aria-label="Close menu" onClick={() => setAddOpen(false)} />
-          <div class="add-menu">
-            <Button
-              variant="ghost"
-              class="add-menu-item"
-              onClick={() => {
-                setAddOpen(false);
-                void s.pickFolder();
-              }}
-            >
-              Add folder…
-            </Button>
-            <div class="add-menu-sep" />
-            <div class="add-menu-label">Scan options</div>
-            <Checkbox checked={s.recursive()} onChange={s.setRecursive}>
-              Recursive
-            </Checkbox>
-            <Checkbox checked={s.includeDirs()} onChange={s.setIncludeDirs}>
-              Include folders
-            </Checkbox>
-          </div>
-        </Show>
+        <Checkbox checked={s.recursive()} onChange={s.setRecursive}>
+          Recursive
+        </Checkbox>
+        <Checkbox checked={s.includeDirs()} onChange={s.setIncludeDirs}>
+          Include folders
+        </Checkbox>
       </div>
 
-      <Button variant="ghost" onClick={s.clearFiles} disabled={!hasFiles()}>
-        Clear
-      </Button>
+      <Show when={hasFiles()}>
+        <Button variant="ghost" onClick={s.clearFiles}>
+          Clear
+        </Button>
+      </Show>
 
       <div class="toolbar-spacer" />
 
@@ -67,7 +48,11 @@ export function Toolbar(props: { onToggleHistory: () => void; onToggleSettings: 
       </Button>
 
       <Show when={conflicts() > 0}>
-        <Button class="conflict-pill" onClick={jumpToConflicts} title="Show conflicting rows">
+        <Button
+          class="conflict-pill"
+          onClick={jumpToConflicts}
+          title="Show conflicting rows"
+        >
           ⚠ {conflicts()} conflict{conflicts() === 1 ? "" : "s"}
         </Button>
       </Show>
