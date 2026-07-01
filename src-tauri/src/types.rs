@@ -81,6 +81,16 @@ pub struct AiResultItem {
     pub new_name: String,
 }
 
+/// Outcome of an `ai_generate` call: possibly-partial results plus batch accounting.
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct AiGenerateReport {
+    pub results: Vec<AiResultItem>,
+    pub failed_chunks: u32,
+    pub total_chunks: u32,
+    pub warning: Option<String>,
+}
+
 /// The transform variants. Internally tagged by `type` so the TS union is ergonomic.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]

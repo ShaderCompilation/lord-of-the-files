@@ -3,6 +3,7 @@ mod commands;
 mod engine;
 mod fs_scan;
 mod history;
+mod settings;
 mod types;
 
 #[cfg(test)]
@@ -14,6 +15,7 @@ use rusqlite::Connection;
 use tauri::Manager;
 
 use history::HistoryDb;
+use settings::SettingsDb;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -27,6 +29,10 @@ pub fn run() {
             let conn = Connection::open(dir.join("history.db"))?;
             history::init_schema(&conn)?;
             app.manage(HistoryDb(Mutex::new(conn)));
+
+            let settings_conn = Connection::open(dir.join("settings.db"))?;
+            settings::init_schema(&settings_conn)?;
+            app.manage(SettingsDb(Mutex::new(settings_conn)));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -37,6 +43,13 @@ pub fn run() {
             commands::undo_operation,
             commands::redo_operation,
             commands::ai_generate,
+            commands::get_settings,
+            commands::upsert_profile,
+            commands::delete_profile,
+            commands::set_active_profile,
+            commands::set_api_key,
+            commands::clear_api_key,
+            commands::test_connection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

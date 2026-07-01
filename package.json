@@ -8,8 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "serve": "vite preview",
-    "tauri": "tauri",
-    "mock-backend": "node mock-backend/server.mjs"
+    "tauri": "tauri"
   },
   "license": "MIT",
   "dependencies": {

@@ -11,6 +11,8 @@ import type {
   FileEntry,
   Operation,
   PreviewResult,
+  ProviderProfile,
+  SettingsState,
   StepConfig,
   StepType,
 } from "./lib/types";
@@ -237,14 +239,88 @@ function setAiBusy(stepId: string, busy: boolean) {
 export async function generateAi(stepId: string, prompt: string): Promise<void> {
   const entries = files();
   if (entries.length === 0 || !prompt.trim()) return;
+  if (!activeProfile()) {
+    setNotice("No active provider — open Settings to add one.");
+    return;
+  }
   setAiBusy(stepId, true);
   try {
-    const results = await ipc.aiGenerate(prompt, entries, 80);
-    setStepResults(stepId, results);
-    setNotice(`AI suggested ${results.length} name(s).`);
+    const report = await ipc.aiGenerate(prompt, entries);
+    setStepResults(stepId, report.results);
+    setNotice(report.warning ?? `AI suggested ${report.results.length} name(s).`);
   } catch (e) {
     setNotice(`AI request failed: ${String(e)}`);
   } finally {
     setAiBusy(stepId, false);
   }
+}
+
+// ---- Settings / providers ---------------------------------------------------------------
+
+const [settings, setSettings] = createSignal<SettingsState>({
+  profiles: [],
+  activeProfileId: null,
+});
+export { settings };
+
+export function activeProfile(): ProviderProfile | undefined {
+  const s = settings();
+  return s.profiles.find((p) => p.id === s.activeProfileId);
+}
+
+export async function loadSettings(): Promise<void> {
+  try {
+    setSettings(await ipc.getSettings());
+  } catch (e) {
+    setNotice(`Could not load settings: ${String(e)}`);
+  }
+}
+
+export async function upsertProfile(profile: ProviderProfile): Promise<void> {
+  try {
+    await ipc.upsertProfile(profile);
+    await loadSettings();
+  } catch (e) {
+    setNotice(`Could not save profile: ${String(e)}`);
+  }
+}
+
+export async function deleteProfile(id: string): Promise<void> {
+  try {
+    await ipc.deleteProfile(id);
+    await loadSettings();
+  } catch (e) {
+    setNotice(`Could not delete profile: ${String(e)}`);
+  }
+}
+
+export async function setActiveProfile(id: string): Promise<void> {
+  try {
+    await ipc.setActiveProfile(id);
+    await loadSettings();
+  } catch (e) {
+    setNotice(`Could not set active profile: ${String(e)}`);
+  }
+}
+
+export async function saveApiKey(profileId: string, key: string): Promise<void> {
+  try {
+    await ipc.setApiKey(profileId, key);
+    await loadSettings();
+  } catch (e) {
+    setNotice(`Could not save API key: ${String(e)}`);
+  }
+}
+
+export async function clearApiKey(profileId: string): Promise<void> {
+  try {
+    await ipc.clearApiKey(profileId);
+    await loadSettings();
+  } catch (e) {
+    setNotice(`Could not clear API key: ${String(e)}`);
+  }
+}
+
+export function testConnection(profileId: string): Promise<string> {
+  return ipc.testConnection(profileId);
 }

@@ -20,8 +20,10 @@ undo/redo.
   case-only changes) blocks unsafe applies.
 - **Persistent history** with multi-level undo/redo (SQLite in the app data dir).
 - Pipeline **presets** saved in localStorage.
-- **AI Rename** step calls a backend over a versioned contract; a local mock backend is
-  included for offline dev.
+- **AI Rename** step is BYOK (bring your own key): configure any OpenAI-compatible provider
+  in Settings — OpenAI, OpenRouter, Groq, Together, Fireworks, DeepInfra, Mistral, DeepSeek,
+  xAI, Perplexity, Gemini, or local Ollama/LM Studio. Keys are stored in the OS keychain and
+  never leave the Rust side after entry.
 
 ## Prerequisites
 
@@ -33,18 +35,13 @@ undo/redo.
 ```bash
 pnpm install
 
-# Optional: run the mock AI backend (needed only for the AI Rename step)
-pnpm mock-backend           # serves http://localhost:8787/v1/rename
-
 # Run the app (Vite + Tauri)
 pnpm tauri dev
 ```
 
-The AI step's backend URL defaults to the mock above and can be overridden:
-
-```bash
-LOTF_BACKEND_URL=https://my-backend/v1/rename pnpm tauri dev
-```
+BYOK: open Settings in the app and add a provider profile (a preset prefills the base URL and
+a default model). For offline dev, run [Ollama](https://ollama.com) locally and pick the
+Ollama preset with a blank API key. Headless/CI can skip the keychain via `LOTF_API_KEY`.
 
 ## Test
 
@@ -60,17 +57,20 @@ src-tauri/src/
   engine/{mod,steps,conflicts}.rs   # pipeline transforms + validation (single source of truth)
   fs_scan.rs                        # selection -> FileEntry list (recursive, dedup)
   history.rs                        # SQLite, two-phase apply, undo/redo
-  ai.rs                             # AI backend client + contract
+  settings.rs                       # provider profiles (SQLite) + API keys (OS keychain)
+  ai.rs                             # BYOK: aisdk-backed OpenAI-compatible adapter, chunking
   types.rs / commands.rs / lib.rs   # shared types, Tauri commands, wiring
 src/
   store.ts                          # central reactive state + actions
-  lib/{types,ipc,diff,steps,presets}.ts
-  components/{Toolbar,FileTable,DiffText,StepCard,PipelineEditor,HistoryPanel}.tsx
-mock-backend/server.mjs             # dev stand-in for the AI backend
+  lib/{types,ipc,diff,steps,presets,providers}.ts
+  components/{Toolbar,FileTable,DiffText,StepCard,PipelineEditor,HistoryPanel,SettingsPanel}.tsx
 ```
 
-## AI backend contract
+## BYOK AI rename
 
-`POST {LOTF_BACKEND_URL}` — see `src/lib/types.ts` (`AiRequestFile` / `AiResponse`) and
-`mock-backend/server.mjs`. Filenames are sent without extension (extensions are preserved
-client-side); the backend returns `{ id, newName }` per file.
+The AI step sends filenames (stem + extension + parent folder hint) and your instruction to
+whichever OpenAI-compatible endpoint is configured as the active provider in Settings — see
+`docs/byok-ai-rename-plan.md` for the full design. No content is ever read from the files
+themselves. Requests are chunked and dispatched with bounded concurrency (both configurable
+per profile); a chunk that errors or times out is counted as a partial failure rather than
+aborting the whole batch.

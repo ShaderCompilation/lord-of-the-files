@@ -7,9 +7,11 @@ import { Toolbar } from "./components/Toolbar";
 import { FileTable } from "./components/FileTable";
 import { PipelineEditor } from "./components/PipelineEditor";
 import { HistoryPanel } from "./components/HistoryPanel";
+import { SettingsPanel } from "./components/SettingsPanel";
 
 export default function App() {
   const [historyOpen, setHistoryOpen] = createSignal(false);
+  const [settingsOpen, setSettingsOpen] = createSignal(false);
 
   // Debounced live preview: recompute whenever files or the pipeline change.
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -23,6 +25,7 @@ export default function App() {
 
   onMount(async () => {
     await s.refreshHistory();
+    await s.loadSettings();
     const unlisten = await getCurrentWebview().onDragDropEvent((event) => {
       if (event.payload.type === "drop") {
         void s.addPaths(event.payload.paths);
@@ -33,7 +36,10 @@ export default function App() {
 
   return (
     <div class="app">
-      <Toolbar onToggleHistory={() => setHistoryOpen((v) => !v)} />
+      <Toolbar
+        onToggleHistory={() => setHistoryOpen((v) => !v)}
+        onToggleSettings={() => setSettingsOpen((v) => !v)}
+      />
 
       <Show when={s.notice()}>
         <div class="notice">
@@ -50,6 +56,7 @@ export default function App() {
       </main>
 
       <HistoryPanel open={historyOpen()} onClose={() => setHistoryOpen(false)} />
+      <SettingsPanel open={settingsOpen()} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }

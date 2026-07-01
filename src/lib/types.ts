@@ -131,16 +131,27 @@ export interface Operation {
   status: "applied" | "undone";
 }
 
-// AI backend contract (also implemented by mock-backend/server.mjs).
-export interface AiRequestFile {
+// BYOK provider settings (see src-tauri/src/settings.rs).
+export interface ProviderProfile {
   id: string;
-  name: string;
-  ext: string;
-  parentHint: string;
-  index: number;
+  label: string;
+  baseUrl: string;
+  model: string;
+  chunkSize: number;
+  concurrency: number;
+  maxLen: number;
+  timeoutSecs: number;
+  hasKey: boolean;
 }
-export interface AiResponse {
-  version: number;
+
+export interface SettingsState {
+  profiles: ProviderProfile[];
+  activeProfileId: string | null;
+}
+
+export interface AiGenerateReport {
   results: AiResultItem[];
-  error: { code: string; message: string } | null;
+  failedChunks: number;
+  totalChunks: number;
+  warning: string | null;
 }

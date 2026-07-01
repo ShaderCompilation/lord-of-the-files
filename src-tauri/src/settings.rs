@@ -1,0 +1,173 @@
+//! Non-secret provider configuration (SQLite) + secret API keys (OS keychain).
+//!
+//! Mirrors the `HistoryDb` managed-state pattern (`history.rs`): a `Mutex<Connection>` held
+//! in Tauri managed state, opened once at startup. All config lives as one JSON blob under a
+//! single settings row (no per-column migrations). Keys never enter that blob and never cross
+//! IPC after entry — only a computed `hasKey` boolean does.
+
+use rusqlite::{params, Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
+use std::sync::Mutex;
+
+/// SQLite connection held in Tauri managed state.
+pub struct SettingsDb(pub Mutex<Connection>);
+
+const KEYRING_SERVICE: &str = "com.lordofthefiles.app";
+
+fn default_chunk_size() -> u32 {
+    40
+}
+fn default_concurrency() -> u32 {
+    3
+}
+fn default_max_len() -> u32 {
+    80
+}
+fn default_timeout_secs() -> u32 {
+    60
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderProfile {
+    pub id: String,
+    pub label: String,
+    pub base_url: String,
+    pub model: String,
+    #[serde(default = "default_chunk_size")]
+    pub chunk_size: u32,
+    #[serde(default = "default_concurrency")]
+    pub concurrency: u32,
+    #[serde(default = "default_max_len")]
+    pub max_len: u32,
+    #[serde(default = "default_timeout_secs")]
+    pub timeout_secs: u32,
+    /// Always recomputed from the keychain before crossing IPC; never persisted meaningfully
+    /// and never holds the key itself.
+    #[serde(default)]
+    pub has_key: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsState {
+    pub profiles: Vec<ProviderProfile>,
+    pub active_profile_id: Option<String>,
+}
+
+pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+    )
+}
+
+pub fn load_state(conn: &Connection) -> SettingsState {
+    let raw: Option<String> = conn
+        .query_row("SELECT value FROM settings WHERE key = 'state'", [], |r| {
+            r.get(0)
+        })
+        .optional()
+        .unwrap_or(None);
+    raw.and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+pub fn save_state(conn: &Connection, state: &SettingsState) -> Result<(), String> {
+    let json = serde_json::to_string(state).map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('state', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![json],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn keychain_unavailable(e: keyring::Error) -> String {
+    format!(
+        "No OS keychain available ({e}) — install gnome-keyring/KWallet, or set LOTF_API_KEY"
+    )
+}
+
+/// Reads the key from the OS keychain; falls back to `LOTF_API_KEY` when the keychain has no
+/// entry for this profile (headless/CI, or no keychain backend installed).
+pub fn get_api_key(profile_id: &str) -> Option<String> {
+    match keyring::Entry::new(KEYRING_SERVICE, profile_id) {
+        Ok(entry) => match entry.get_password() {
+            Ok(pw) => Some(pw),
+            Err(_) => std::env::var("LOTF_API_KEY").ok(),
+        },
+        Err(_) => std::env::var("LOTF_API_KEY").ok(),
+    }
+}
+
+pub fn set_api_key(profile_id: &str, key: &str) -> Result<(), String> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, profile_id).map_err(keychain_unavailable)?;
+    entry.set_password(key).map_err(keychain_unavailable)
+}
+
+pub fn clear_api_key(profile_id: &str) -> Result<(), String> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, profile_id).map_err(keychain_unavailable)?;
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(keychain_unavailable(e)),
+    }
+}
+
+pub fn has_api_key(profile_id: &str) -> bool {
+    get_api_key(profile_id).is_some_and(|k| !k.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mem_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        init_schema(&conn).unwrap();
+        conn
+    }
+
+    #[test]
+    fn load_state_defaults_when_missing() {
+        let conn = mem_db();
+        let state = load_state(&conn);
+        assert!(state.profiles.is_empty());
+        assert!(state.active_profile_id.is_none());
+    }
+
+    #[test]
+    fn save_then_load_round_trips() {
+        let conn = mem_db();
+        let state = SettingsState {
+            profiles: vec![ProviderProfile {
+                id: "p1".into(),
+                label: "OpenRouter".into(),
+                base_url: "https://openrouter.ai/api/v1".into(),
+                model: "openai/gpt-4o-mini".into(),
+                chunk_size: 40,
+                concurrency: 3,
+                max_len: 80,
+                timeout_secs: 60,
+                has_key: false,
+            }],
+            active_profile_id: Some("p1".into()),
+        };
+        save_state(&conn, &state).unwrap();
+        let loaded = load_state(&conn);
+        assert_eq!(loaded.active_profile_id.as_deref(), Some("p1"));
+        assert_eq!(loaded.profiles.len(), 1);
+        assert_eq!(loaded.profiles[0].label, "OpenRouter");
+    }
+
+    #[test]
+    #[ignore = "requires a real OS keychain backend"]
+    fn keychain_round_trip() {
+        let id = "lotf-test-profile";
+        set_api_key(id, "sk-test-123").unwrap();
+        assert!(has_api_key(id));
+        assert_eq!(get_api_key(id).as_deref(), Some("sk-test-123"));
+        clear_api_key(id).unwrap();
+        assert!(!has_api_key(id));
+    }
+}
