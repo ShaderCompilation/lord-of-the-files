@@ -116,6 +116,7 @@ export interface ApplyReport {
   operationId: string | null;
   renamed: number;
   failures: Failure[];
+  historyError: string | null;
 }
 
 export interface UndoReport {

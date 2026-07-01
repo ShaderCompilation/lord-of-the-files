@@ -247,3 +247,147 @@ pub fn compute_preview(entries: &[FileEntry], pipeline: &Pipeline) -> PreviewRes
     conflicts::annotate(entries, &mut rows);
     PreviewResult { rows, step_errors }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(id: &str, parent_dir: &str, stem: &str, ext: &str) -> FileEntry {
+        FileEntry {
+            id: id.to_string(),
+            path: format!("{parent_dir}/{stem}.{ext}"),
+            parent_dir: parent_dir.to_string(),
+            stem: stem.to_string(),
+            ext: ext.to_string(),
+            is_dir: false,
+            size: 0,
+            modified: None,
+        }
+    }
+
+    fn step(scope: Scope, step: Step) -> StepConfig {
+        StepConfig {
+            id: "s".to_string(),
+            enabled: true,
+            scope,
+            step,
+        }
+    }
+
+    #[test]
+    fn full_scope_multidot_filename_round_trip() {
+        let entries = vec![entry("a", "/dir", "archive.tar", "gz")];
+        let pipeline = Pipeline {
+            steps: vec![step(
+                Scope::Full,
+                Step::FindReplace {
+                    find: "tar".to_string(),
+                    replace: "zip".to_string(),
+                    case_sensitive: true,
+                    all_occurrences: true,
+                },
+            )],
+        };
+        let (rows, _) = run_pipeline(&entries, &pipeline);
+        assert_eq!(rows[0].original, "archive.tar.gz");
+        assert_eq!(rows[0].new_name, "archive.zip.gz");
+    }
+
+    #[test]
+    fn counter_reset_per_directory_across_multiple_dirs() {
+        let entries = vec![
+            entry("a1", "/a", "file", "txt"),
+            entry("b1", "/b", "file", "txt"),
+            entry("a2", "/a", "file", "txt"),
+            entry("b2", "/b", "file", "txt"),
+        ];
+        let pipeline = Pipeline {
+            steps: vec![step(
+                Scope::Stem,
+                Step::Counter {
+                    start: 1,
+                    step: 1,
+                    padding: 0,
+                    separator: "_".to_string(),
+                    position: AffixPosition::Suffix,
+                    reset_per_directory: true,
+                },
+            )],
+        };
+        let (rows, _) = run_pipeline(&entries, &pipeline);
+        let name_for = |id: &str| rows.iter().find(|r| r.id == id).unwrap().new_name.clone();
+        assert_eq!(name_for("a1"), "file_1.txt");
+        assert_eq!(name_for("a2"), "file_2.txt");
+        assert_eq!(name_for("b1"), "file_1.txt");
+        assert_eq!(name_for("b2"), "file_2.txt");
+    }
+
+    #[test]
+    fn counter_no_reset_uses_global_index() {
+        let entries = vec![
+            entry("a1", "/a", "file", "txt"),
+            entry("b1", "/b", "file", "txt"),
+            entry("a2", "/a", "file", "txt"),
+            entry("b2", "/b", "file", "txt"),
+        ];
+        let pipeline = Pipeline {
+            steps: vec![step(
+                Scope::Stem,
+                Step::Counter {
+                    start: 1,
+                    step: 1,
+                    padding: 0,
+                    separator: "_".to_string(),
+                    position: AffixPosition::Suffix,
+                    reset_per_directory: false,
+                },
+            )],
+        };
+        let (rows, _) = run_pipeline(&entries, &pipeline);
+        let name_for = |id: &str| rows.iter().find(|r| r.id == id).unwrap().new_name.clone();
+        assert_eq!(name_for("a1"), "file_1.txt");
+        assert_eq!(name_for("b1"), "file_2.txt");
+        assert_eq!(name_for("a2"), "file_3.txt");
+        assert_eq!(name_for("b2"), "file_4.txt");
+    }
+
+    #[test]
+    fn multi_step_pipeline_applies_in_order() {
+        let entries = vec![entry("a", "/dir", "foo", "txt")];
+        let pipeline = Pipeline {
+            steps: vec![
+                step(
+                    Scope::Stem,
+                    Step::FindReplace {
+                        find: "foo".to_string(),
+                        replace: "bar".to_string(),
+                        case_sensitive: true,
+                        all_occurrences: true,
+                    },
+                ),
+                step(Scope::Stem, Step::ChangeCase { mode: CaseMode::Upper }),
+            ],
+        };
+        let (rows, _) = run_pipeline(&entries, &pipeline);
+        assert_eq!(rows[0].new_name, "BAR.txt");
+    }
+
+    #[test]
+    fn disabled_step_is_skipped() {
+        let entries = vec![entry("a", "/dir", "foo", "txt")];
+        let mut cfg = step(
+            Scope::Stem,
+            Step::FindReplace {
+                find: "foo".to_string(),
+                replace: "bar".to_string(),
+                case_sensitive: true,
+                all_occurrences: true,
+            },
+        );
+        cfg.enabled = false;
+        let pipeline = Pipeline { steps: vec![cfg] };
+        let (rows, _) = run_pipeline(&entries, &pipeline);
+        assert_eq!(rows[0].new_name, "foo.txt");
+        assert_eq!(rows[0].status, RowStatus::Unchanged);
+    }
+}

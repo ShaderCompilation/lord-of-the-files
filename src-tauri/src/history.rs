@@ -34,6 +34,9 @@ pub struct ApplyReport {
     pub operation_id: Option<String>,
     pub renamed: usize,
     pub failures: Vec<Failure>,
+    /// Set if the files were renamed on disk but the history record failed to save (e.g. a
+    /// SQLite write error), meaning this batch will not be undoable from the History panel.
+    pub history_error: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -124,6 +127,10 @@ fn migrate_add_rename_status(conn: &Connection) -> rusqlite::Result<()> {
 
 /// Move a batch of files via a temp staging phase. Returns the (from, to) pairs that
 /// succeeded plus any failures.
+///
+/// Note: the destination-exists check right before Phase 2's rename narrows but does not
+/// eliminate the TOCTOU race against a file appearing at `to` between the check and the
+/// rename — `std::fs::rename` has no portable no-clobber flag in stable std.
 fn move_batch(moves: &[(String, String)]) -> (Vec<(String, String)>, Vec<Failure>) {
     let mut failures = Vec::new();
     // (temp, to, from)
@@ -149,6 +156,16 @@ fn move_batch(moves: &[(String, String)]) -> (Vec<(String, String)>, Vec<Failure
 
     let mut done = Vec::new();
     for (temp, to, from) in staged {
+        // By this point every in-batch source has already been staged away in Phase 1, so an
+        // existing `to` here can only be a file outside this batch — never overwrite it.
+        if Path::new(&to).exists() {
+            let _ = std::fs::rename(&temp, &from);
+            failures.push(Failure {
+                path: from,
+                error: format!("Destination already exists: {to}"),
+            });
+            continue;
+        }
         match std::fs::rename(&temp, &to) {
             Ok(()) => done.push((from, to)),
             Err(e) => {
@@ -169,17 +186,19 @@ fn record_operation(conn: &Connection, pairs: &[(String, String)]) -> rusqlite::
     let id = Uuid::new_v4().to_string();
     let created_at = chrono::Utc::now().to_rfc3339();
     let summary = format!("Renamed {} file(s)", pairs.len());
-    conn.execute(
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
         "INSERT INTO operations (id, created_at, summary, item_count, status)
          VALUES (?1, ?2, ?3, ?4, 'applied')",
         params![id, created_at, summary, pairs.len() as i64],
     )?;
     for (ord, (old, new)) in pairs.iter().enumerate() {
-        conn.execute(
+        tx.execute(
             "INSERT INTO renames (op_id, ord, old_path, new_path) VALUES (?1, ?2, ?3, ?4)",
             params![id, ord as i64, old, new],
         )?;
     }
+    tx.commit()?;
     Ok(id)
 }
 
@@ -197,16 +216,23 @@ pub fn apply_rename(conn: &Connection, items: &[RenameItem]) -> ApplyReport {
         .collect();
 
     let (done, failures) = move_batch(&moves);
-    let operation_id = if done.is_empty() {
-        None
+    let (operation_id, history_error) = if done.is_empty() {
+        (None, None)
     } else {
-        record_operation(conn, &done).ok()
+        match record_operation(conn, &done) {
+            Ok(id) => (Some(id), None),
+            Err(e) => {
+                log::warn!("apply_rename: files renamed but history record failed: {e}");
+                (None, Some(e.to_string()))
+            }
+        }
     };
 
     ApplyReport {
         operation_id,
         renamed: done.len(),
         failures,
+        history_error,
     }
 }
 
@@ -674,5 +700,103 @@ mod tests {
         let checks = preview_redo(&conn, &op_id).unwrap();
         assert_eq!(checks.len(), 1);
         assert_eq!(checks[0].status, CheckStatus::Ok);
+    }
+
+    #[test]
+    fn apply_rename_does_not_overwrite_external_destination() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        let b = dir.path().join("b.txt");
+        std::fs::write(&a, "A").unwrap();
+        std::fs::write(&b, "external").unwrap();
+        let conn = mem_db();
+
+        let items = vec![RenameItem {
+            old_path: a.to_string_lossy().to_string(),
+            new_name: "b.txt".to_string(),
+        }];
+        let report = apply_rename(&conn, &items);
+
+        assert_eq!(report.renamed, 0);
+        assert_eq!(report.failures.len(), 1);
+        assert_eq!(report.failures[0].path, a.to_string_lossy().to_string());
+        assert!(a.exists(), "source should be rolled back, not lost");
+        assert_eq!(std::fs::read_to_string(&b).unwrap(), "external");
+    }
+
+    #[test]
+    fn undo_operation_does_not_overwrite_external_recreation_at_old_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        let b = dir.path().join("b.txt");
+        std::fs::write(&a, "A").unwrap();
+        let conn = mem_db();
+
+        let items = vec![RenameItem {
+            old_path: a.to_string_lossy().to_string(),
+            new_name: "b.txt".to_string(),
+        }];
+        let report = apply_rename(&conn, &items);
+        let op_id = report.operation_id.unwrap();
+        assert!(b.exists());
+
+        // Externally recreate a.txt (the undo target) with different content.
+        std::fs::write(&a, "external").unwrap();
+
+        let u = undo_operation(&conn, &op_id).unwrap();
+        assert_eq!(u.reverted, 0);
+        assert_eq!(u.failures.len(), 1);
+        assert!(b.exists(), "b.txt should be preserved, not lost");
+        assert_eq!(std::fs::read_to_string(&a).unwrap(), "external");
+    }
+
+    #[test]
+    fn redo_operation_does_not_overwrite_external_recreation_at_new_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        let b = dir.path().join("b.txt");
+        std::fs::write(&a, "A").unwrap();
+        let conn = mem_db();
+
+        let items = vec![RenameItem {
+            old_path: a.to_string_lossy().to_string(),
+            new_name: "b.txt".to_string(),
+        }];
+        let report = apply_rename(&conn, &items);
+        let op_id = report.operation_id.unwrap();
+        undo_operation(&conn, &op_id).unwrap();
+        assert!(a.exists());
+
+        // Externally recreate b.txt (the redo target) with different content.
+        std::fs::write(&b, "external").unwrap();
+
+        let r = redo_operation(&conn, &op_id).unwrap();
+        assert_eq!(r.reverted, 0);
+        assert_eq!(r.failures.len(), 1);
+        assert!(a.exists(), "a.txt should be preserved, not lost");
+        assert_eq!(std::fs::read_to_string(&b).unwrap(), "external");
+    }
+
+    #[test]
+    fn apply_rename_logs_but_does_not_lose_files_on_history_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        std::fs::write(&a, "A").unwrap();
+        let conn = mem_db();
+        // Force record_operation to fail while leaving the filesystem move itself intact.
+        conn.execute_batch("DROP TABLE renames;").unwrap();
+
+        let items = vec![RenameItem {
+            old_path: a.to_string_lossy().to_string(),
+            new_name: "b.txt".to_string(),
+        }];
+        let report = apply_rename(&conn, &items);
+
+        assert_eq!(report.renamed, 1);
+        assert!(report.failures.is_empty());
+        assert!(dir.path().join("b.txt").exists());
+        assert!(!a.exists());
+        assert!(report.operation_id.is_none());
+        assert!(report.history_error.is_some());
     }
 }

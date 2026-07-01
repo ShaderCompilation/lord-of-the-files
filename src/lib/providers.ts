@@ -63,7 +63,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   },
   {
     label: "Gemini",
-    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
     defaultModel: "gemini-2.5-flash-lite",
   },
   {

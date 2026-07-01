@@ -89,3 +89,73 @@ pub fn scan_paths(paths: &[String], recursive: bool, include_dirs: bool) -> Vec<
 
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scan_non_recursive_only_top_level() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("top.txt"), "x").unwrap();
+        let sub = dir.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("nested.txt"), "x").unwrap();
+
+        let entries = scan_paths(&[dir.path().to_string_lossy().to_string()], false, false);
+        let names: Vec<_> = entries.iter().map(|e| e.stem.clone()).collect();
+        assert_eq!(names, vec!["top"]);
+    }
+
+    #[test]
+    fn scan_recursive_includes_nested_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("top.txt"), "x").unwrap();
+        let sub = dir.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("nested.txt"), "x").unwrap();
+
+        let entries = scan_paths(&[dir.path().to_string_lossy().to_string()], true, false);
+        let mut names: Vec<_> = entries.iter().map(|e| e.stem.clone()).collect();
+        names.sort();
+        assert_eq!(names, vec!["nested", "top"]);
+    }
+
+    #[test]
+    fn scan_include_dirs_true_adds_directory_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("nested.txt"), "x").unwrap();
+
+        let entries = scan_paths(&[dir.path().to_string_lossy().to_string()], true, true);
+        // The walked "sub" directory and the top-level selected directory itself both count.
+        let dirs: Vec<_> = entries.iter().filter(|e| e.is_dir).collect();
+        assert_eq!(dirs.len(), 2);
+        let sub_entry = dirs.iter().find(|e| e.stem == "sub").expect("sub dir entry present");
+        assert_eq!(sub_entry.size, 0);
+        assert_eq!(sub_entry.ext, "");
+    }
+
+    #[test]
+    fn scan_include_dirs_false_excludes_directory_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("nested.txt"), "x").unwrap();
+
+        let entries = scan_paths(&[dir.path().to_string_lossy().to_string()], true, false);
+        assert!(entries.iter().all(|e| !e.is_dir));
+    }
+
+    #[test]
+    fn scan_deduplicates_same_path_passed_twice() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.txt");
+        std::fs::write(&file, "x").unwrap();
+        let path = file.to_string_lossy().to_string();
+
+        let entries = scan_paths(&[path.clone(), path], false, false);
+        assert_eq!(entries.len(), 1);
+    }
+}
