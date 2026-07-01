@@ -9,6 +9,7 @@ import {
 } from "../lib/presets";
 import { Button, Checkbox } from "./common";
 import { AddStepMenu } from "./AddStepMenu";
+import { SavePresetDialog } from "./SavePresetDialog";
 import { StepCard } from "./StepCard";
 
 export function PipelineEditor() {
@@ -17,6 +18,7 @@ export function PipelineEditor() {
       loadPresets(),
     );
   const [selected, setSelected] = createSignal("");
+  const [saveDialogOpen, setSaveDialogOpen] = createSignal(false);
 
   // Drag-to-reorder state: which card is being dragged and which slot it's hovering.
   const [dragIndex, setDragIndex] = createSignal<number | null>(null);
@@ -30,12 +32,13 @@ export function PipelineEditor() {
     if (steps) s.loadPipeline(instantiate(steps));
   };
 
-  const onSave = () => {
-    const name = window.prompt("Preset name:");
-    if (!name) return;
+  const onSave = () => setSaveDialogOpen(true);
+
+  const onConfirmSave = (name: string) => {
     savePreset(name, s.pipeline.steps);
     refreshPresets();
     setSelected(name);
+    setSaveDialogOpen(false);
   };
 
   const onDelete = () => {
@@ -147,6 +150,14 @@ export function PipelineEditor() {
           </Show>
         </div>
       </Show>
+
+      <SavePresetDialog
+        open={saveDialogOpen()}
+        presetNames={Object.keys(presets())}
+        currentName={selected()}
+        onCancel={() => setSaveDialogOpen(false)}
+        onConfirm={onConfirmSave}
+      />
     </aside>
   );
 }

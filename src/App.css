@@ -935,6 +935,43 @@ textarea:focus {
   color: var(--red);
 }
 
+/* ---- Save preset dialog ---- */
+.save-preset-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 320px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 20;
+}
+.save-preset-dialog h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.save-preset-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.save-preset-input {
+  margin-left: 20px;
+  width: calc(100% - 20px);
+}
+.save-preset-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--border);
+}
+
 /* Utility classes */
 
 .text-center {
