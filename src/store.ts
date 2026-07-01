@@ -238,7 +238,6 @@ export async function applyAll(): Promise<void> {
         return { ...f, id: newPath, path: newPath, stem, ext };
       }),
     );
-    clearPipeline();
     await refreshHistory();
     const failMsg = report.failures.length ? `, ${report.failures.length} failed` : "";
     setNotice(`Renamed ${report.renamed} file(s)${failMsg}.`);

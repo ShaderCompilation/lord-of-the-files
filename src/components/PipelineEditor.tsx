@@ -62,7 +62,7 @@ export function PipelineEditor() {
   return (
     <aside class="pipeline">
       <div class="pipeline-head">
-        <h2>Recipe</h2>
+        <h2>Pipeline</h2>
         <Show when={hasFiles()}>
           <div class="pipeline-head-actions">
             <Checkbox

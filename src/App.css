@@ -433,7 +433,7 @@ textarea:focus {
   margin: 8px 0;
 }
 
-/* Method chooser (files added, recipe still empty) */
+/* Method chooser (files added, no steps selected - Pipeline is empty) */
 .method-chooser {
   display: flex;
   flex-direction: column;
