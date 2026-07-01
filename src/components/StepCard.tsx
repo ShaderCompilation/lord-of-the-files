@@ -3,6 +3,7 @@ import { Match, Show, Switch } from "solid-js";
 import * as s from "../store";
 import { STEP_LABELS } from "../lib/steps";
 import type { Scope, StepConfig } from "../lib/types";
+import { Button, Checkbox, SelectField, TextField, TextareaField } from "./common";
 
 /** Narrow `props.step` to a specific variant for typed field access. */
 type Variant<T extends StepConfig["type"]> = Extract<StepConfig, { type: T }>;
@@ -23,25 +24,25 @@ export function StepCard(props: { step: StepConfig; index: number; total: number
         />
         <span class="stepcard-title">{STEP_LABELS[props.step.type]}</span>
         <div class="stepcard-actions">
-          <button type="button"
-            class="icon"
+          <Button
+            variant="icon"
             disabled={props.index === 0}
             onClick={() => s.moveStep(props.index, props.index - 1)}
             title="Move up"
           >
             ↑
-          </button>
-          <button type="button"
-            class="icon"
+          </Button>
+          <Button
+            variant="icon"
             disabled={props.index === props.total - 1}
             onClick={() => s.moveStep(props.index, props.index + 1)}
             title="Move down"
           >
             ↓
-          </button>
-          <button type="button" class="icon danger" onClick={() => s.removeStep(id())} title="Remove">
+          </Button>
+          <Button variant="icon" danger onClick={() => s.removeStep(id())} title="Remove">
             ✕
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -52,33 +53,20 @@ export function StepCard(props: { step: StepConfig; index: number; total: number
               const st = props.step as Variant<"findReplace">;
               return (
                 <>
-                  <label class="field">
-                    Find
-                    <input value={st.find} onInput={(e) => set({ find: e.currentTarget.value })} />
-                  </label>
-                  <label class="field">
-                    Replace
-                    <input
-                      value={st.replace}
-                      onInput={(e) => set({ replace: e.currentTarget.value })}
-                    />
-                  </label>
-                  <label class="check">
-                    <input
-                      type="checkbox"
-                      checked={st.caseSensitive}
-                      onChange={(e) => set({ caseSensitive: e.currentTarget.checked })}
-                    />
+                  <TextField label="Find" value={st.find} onInput={(v) => set({ find: v })} />
+                  <TextField label="Replace" value={st.replace} onInput={(v) => set({ replace: v })} />
+                  <Checkbox
+                    checked={st.caseSensitive}
+                    onChange={(v) => set({ caseSensitive: v })}
+                  >
                     Case sensitive
-                  </label>
-                  <label class="check">
-                    <input
-                      type="checkbox"
-                      checked={st.allOccurrences}
-                      onChange={(e) => set({ allOccurrences: e.currentTarget.checked })}
-                    />
+                  </Checkbox>
+                  <Checkbox
+                    checked={st.allOccurrences}
+                    onChange={(v) => set({ allOccurrences: v })}
+                  >
                     All occurrences
-                  </label>
+                  </Checkbox>
                 </>
               );
             })()}
@@ -89,40 +77,26 @@ export function StepCard(props: { step: StepConfig; index: number; total: number
               const st = props.step as Variant<"regex">;
               return (
                 <>
-                  <label class="field">
-                    Pattern
-                    <input
-                      class="mono"
-                      value={st.pattern}
-                      onInput={(e) => set({ pattern: e.currentTarget.value })}
-                      placeholder="(\\d+)"
-                    />
-                  </label>
-                  <label class="field">
-                    Replacement
-                    <input
-                      class="mono"
-                      value={st.replacement}
-                      onInput={(e) => set({ replacement: e.currentTarget.value })}
-                      placeholder="${1}"
-                    />
-                  </label>
-                  <label class="check">
-                    <input
-                      type="checkbox"
-                      checked={st.ignoreCase}
-                      onChange={(e) => set({ ignoreCase: e.currentTarget.checked })}
-                    />
+                  <TextField
+                    label="Pattern"
+                    mono
+                    value={st.pattern}
+                    onInput={(v) => set({ pattern: v })}
+                    placeholder="(\\d+)"
+                  />
+                  <TextField
+                    label="Replacement"
+                    mono
+                    value={st.replacement}
+                    onInput={(v) => set({ replacement: v })}
+                    placeholder="${1}"
+                  />
+                  <Checkbox checked={st.ignoreCase} onChange={(v) => set({ ignoreCase: v })}>
                     Ignore case
-                  </label>
-                  <label class="check">
-                    <input
-                      type="checkbox"
-                      checked={st.multiline}
-                      onChange={(e) => set({ multiline: e.currentTarget.checked })}
-                    />
+                  </Checkbox>
+                  <Checkbox checked={st.multiline} onChange={(v) => set({ multiline: v })}>
                     Multiline
-                  </label>
+                  </Checkbox>
                 </>
               );
             })()}
@@ -132,18 +106,15 @@ export function StepCard(props: { step: StepConfig; index: number; total: number
             {(() => {
               const st = props.step as Variant<"changeCase">;
               return (
-                <label class="field">
-                  Mode
-                  <select value={st.mode} onChange={(e) => set({ mode: e.currentTarget.value })}>
-                    <option value="lower">lower case</option>
-                    <option value="upper">UPPER CASE</option>
-                    <option value="title">Title Case</option>
-                    <option value="sentence">Sentence case</option>
-                    <option value="camel">camelCase</option>
-                    <option value="snake">snake_case</option>
-                    <option value="kebab">kebab-case</option>
-                  </select>
-                </label>
+                <SelectField label="Mode" value={st.mode} onChange={(v) => set({ mode: v })}>
+                  <option value="lower">lower case</option>
+                  <option value="upper">UPPER CASE</option>
+                  <option value="title">Title Case</option>
+                  <option value="sentence">Sentence case</option>
+                  <option value="camel">camelCase</option>
+                  <option value="snake">snake_case</option>
+                  <option value="kebab">kebab-case</option>
+                </SelectField>
               );
             })()}
           </Match>
@@ -153,30 +124,23 @@ export function StepCard(props: { step: StepConfig; index: number; total: number
               const st = props.step as Variant<"insert">;
               return (
                 <>
-                  <label class="field">
-                    Text
-                    <input value={st.text} onInput={(e) => set({ text: e.currentTarget.value })} />
-                  </label>
-                  <label class="field">
-                    Position
-                    <select
-                      value={st.position}
-                      onChange={(e) => set({ position: e.currentTarget.value })}
-                    >
-                      <option value="prefix">Prefix</option>
-                      <option value="suffix">Suffix</option>
-                      <option value="atIndex">At index</option>
-                    </select>
-                  </label>
+                  <TextField label="Text" value={st.text} onInput={(v) => set({ text: v })} />
+                  <SelectField
+                    label="Position"
+                    value={st.position}
+                    onChange={(v) => set({ position: v })}
+                  >
+                    <option value="prefix">Prefix</option>
+                    <option value="suffix">Suffix</option>
+                    <option value="atIndex">At index</option>
+                  </SelectField>
                   <Show when={st.position === "atIndex"}>
-                    <label class="field">
-                      Index
-                      <input
-                        type="number"
-                        value={st.index}
-                        onInput={(e) => set({ index: Number(e.currentTarget.value) })}
-                      />
-                    </label>
+                    <TextField
+                      label="Index"
+                      type="number"
+                      value={st.index}
+                      onInput={(v) => set({ index: Number(v) })}
+                    />
                   </Show>
                 </>
               );
@@ -188,33 +152,26 @@ export function StepCard(props: { step: StepConfig; index: number; total: number
               const st = props.step as Variant<"remove">;
               return (
                 <>
-                  <label class="field">
-                    From
-                    <select value={st.from} onChange={(e) => set({ from: e.currentTarget.value })}>
-                      <option value="start">Start</option>
-                      <option value="end">End</option>
-                      <option value="index">Index</option>
-                    </select>
-                  </label>
-                  <label class="field">
-                    Count
-                    <input
+                  <SelectField label="From" value={st.from} onChange={(v) => set({ from: v })}>
+                    <option value="start">Start</option>
+                    <option value="end">End</option>
+                    <option value="index">Index</option>
+                  </SelectField>
+                  <TextField
+                    label="Count"
+                    type="number"
+                    min="0"
+                    value={st.count}
+                    onInput={(v) => set({ count: Number(v) })}
+                  />
+                  <Show when={st.from === "index"}>
+                    <TextField
+                      label="Index"
                       type="number"
                       min="0"
-                      value={st.count}
-                      onInput={(e) => set({ count: Number(e.currentTarget.value) })}
+                      value={st.index}
+                      onInput={(v) => set({ index: Number(v) })}
                     />
-                  </label>
-                  <Show when={st.from === "index"}>
-                    <label class="field">
-                      Index
-                      <input
-                        type="number"
-                        min="0"
-                        value={st.index}
-                        onInput={(e) => set({ index: Number(e.currentTarget.value) })}
-                      />
-                    </label>
                   </Show>
                 </>
               );
@@ -230,39 +187,27 @@ export function StepCard(props: { step: StepConfig; index: number; total: number
                 set({ spacesTo: v === "none" ? null : v === "remove" ? "" : v });
               return (
                 <>
-                  <label class="check">
-                    <input
-                      type="checkbox"
-                      checked={st.trim}
-                      onChange={(e) => set({ trim: e.currentTarget.checked })}
-                    />
+                  <Checkbox checked={st.trim} onChange={(v) => set({ trim: v })}>
                     Trim ends
-                  </label>
-                  <label class="check">
-                    <input
-                      type="checkbox"
-                      checked={st.collapseWhitespace}
-                      onChange={(e) => set({ collapseWhitespace: e.currentTarget.checked })}
-                    />
+                  </Checkbox>
+                  <Checkbox
+                    checked={st.collapseWhitespace}
+                    onChange={(v) => set({ collapseWhitespace: v })}
+                  >
                     Collapse whitespace
-                  </label>
-                  <label class="check">
-                    <input
-                      type="checkbox"
-                      checked={st.stripDiacritics}
-                      onChange={(e) => set({ stripDiacritics: e.currentTarget.checked })}
-                    />
+                  </Checkbox>
+                  <Checkbox
+                    checked={st.stripDiacritics}
+                    onChange={(v) => set({ stripDiacritics: v })}
+                  >
                     Strip diacritics
-                  </label>
-                  <label class="field">
-                    Spaces →
-                    <select value={spaceValue()} onChange={(e) => onSpace(e.currentTarget.value)}>
-                      <option value="none">Keep</option>
-                      <option value="-">Dash (-)</option>
-                      <option value="_">Underscore (_)</option>
-                      <option value="remove">Remove</option>
-                    </select>
-                  </label>
+                  </Checkbox>
+                  <SelectField label="Spaces →" value={spaceValue()} onChange={onSpace}>
+                    <option value="none">Keep</option>
+                    <option value="-">Dash (-)</option>
+                    <option value="_">Underscore (_)</option>
+                    <option value="remove">Remove</option>
+                  </SelectField>
                 </>
               );
             })()}
@@ -273,56 +218,44 @@ export function StepCard(props: { step: StepConfig; index: number; total: number
               const st = props.step as Variant<"counter">;
               return (
                 <>
-                  <label class="field">
-                    Start
-                    <input
-                      type="number"
-                      value={st.start}
-                      onInput={(e) => set({ start: Number(e.currentTarget.value) })}
-                    />
-                  </label>
-                  <label class="field">
-                    Step
-                    <input
-                      type="number"
-                      value={st.step}
-                      onInput={(e) => set({ step: Number(e.currentTarget.value) })}
-                    />
-                  </label>
-                  <label class="field">
-                    Padding
-                    <input
-                      type="number"
-                      min="0"
-                      value={st.padding}
-                      onInput={(e) => set({ padding: Number(e.currentTarget.value) })}
-                    />
-                  </label>
-                  <label class="field">
-                    Separator
-                    <input
-                      value={st.separator}
-                      onInput={(e) => set({ separator: e.currentTarget.value })}
-                    />
-                  </label>
-                  <label class="field">
-                    Position
-                    <select
-                      value={st.position}
-                      onChange={(e) => set({ position: e.currentTarget.value })}
-                    >
-                      <option value="prefix">Prefix</option>
-                      <option value="suffix">Suffix</option>
-                    </select>
-                  </label>
-                  <label class="check">
-                    <input
-                      type="checkbox"
-                      checked={st.resetPerDirectory}
-                      onChange={(e) => set({ resetPerDirectory: e.currentTarget.checked })}
-                    />
+                  <TextField
+                    label="Start"
+                    type="number"
+                    value={st.start}
+                    onInput={(v) => set({ start: Number(v) })}
+                  />
+                  <TextField
+                    label="Step"
+                    type="number"
+                    value={st.step}
+                    onInput={(v) => set({ step: Number(v) })}
+                  />
+                  <TextField
+                    label="Padding"
+                    type="number"
+                    min="0"
+                    value={st.padding}
+                    onInput={(v) => set({ padding: Number(v) })}
+                  />
+                  <TextField
+                    label="Separator"
+                    value={st.separator}
+                    onInput={(v) => set({ separator: v })}
+                  />
+                  <SelectField
+                    label="Position"
+                    value={st.position}
+                    onChange={(v) => set({ position: v })}
+                  >
+                    <option value="prefix">Prefix</option>
+                    <option value="suffix">Suffix</option>
+                  </SelectField>
+                  <Checkbox
+                    checked={st.resetPerDirectory}
+                    onChange={(v) => set({ resetPerDirectory: v })}
+                  >
                     Reset per folder
-                  </label>
+                  </Checkbox>
                 </>
               );
             })()}
@@ -333,17 +266,14 @@ export function StepCard(props: { step: StepConfig; index: number; total: number
               const st = props.step as Variant<"ai">;
               return (
                 <>
-                  <label class="field">
-                    Prompt
-                    <textarea
-                      rows="3"
-                      value={st.prompt}
-                      onInput={(e) => set({ prompt: e.currentTarget.value })}
-                      placeholder="e.g. Make names Title Case and human-readable"
-                    />
-                  </label>
+                  <TextareaField
+                    label="Prompt"
+                    value={st.prompt}
+                    onInput={(v) => set({ prompt: v })}
+                    placeholder="e.g. Make names Title Case and human-readable"
+                  />
                   <div class="ai-row">
-                    <button type="button"
+                    <Button
                       onClick={() => s.generateAi(id(), st.prompt)}
                       disabled={
                         s.isAiLoading(id()) ||
@@ -353,7 +283,7 @@ export function StepCard(props: { step: StepConfig; index: number; total: number
                       }
                     >
                       {s.isAiLoading(id()) ? "Generating…" : "Generate"}
-                    </button>
+                    </Button>
                     <span class="muted">
                       {st.results ? `${st.results.length} suggestion(s) cached` : "not run yet"}
                     </span>
@@ -368,17 +298,16 @@ export function StepCard(props: { step: StepConfig; index: number; total: number
         </Switch>
 
         <div class="stepcard-footer">
-          <label class="field scope">
-            Scope
-            <select
-              value={props.step.scope}
-              onChange={(e) => set({ scope: e.currentTarget.value as Scope })}
-            >
-              <option value="stem">Name</option>
-              <option value="ext">Extension</option>
-              <option value="full">Full name</option>
-            </select>
-          </label>
+          <SelectField
+            label="Scope"
+            class="scope"
+            value={props.step.scope}
+            onChange={(v) => set({ scope: v as Scope })}
+          >
+            <option value="stem">Name</option>
+            <option value="ext">Extension</option>
+            <option value="full">Full name</option>
+          </SelectField>
         </div>
 
         <Show when={error()}>

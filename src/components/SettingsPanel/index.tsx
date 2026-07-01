@@ -1,6 +1,7 @@
 import { Show, createEffect, createSignal } from "solid-js";
 
 import * as s from "../../store";
+import { Button, Overlay } from "../common";
 import { ProfileForm } from "./ProfileForm";
 import { ProfileList } from "./ProfileList";
 import { createProfileEditor } from "./profileEditor";
@@ -38,20 +39,20 @@ export function SettingsPanel(props: { open: boolean; onClose: () => void }) {
 
   return (
     <Show when={props.open}>
-      <button type="button" class="overlay" aria-label="Close settings" onClick={props.onClose} />
+      <Overlay ariaLabel="Close settings" onClick={props.onClose} />
       <aside class="settings-panel">
         <div class="settings-head">
           <div class="settings-head-left">
             <Show when={view() === "form"}>
-              <button type="button" class="icon" onClick={back} title="Back">
+              <Button variant="icon" onClick={back} title="Back">
                 ←
-              </button>
+              </Button>
             </Show>
             <h2>{headTitle()}</h2>
           </div>
-          <button type="button" class="icon" onClick={props.onClose} title="Close">
+          <Button variant="icon" onClick={props.onClose} title="Close">
             ✕
-          </button>
+          </Button>
         </div>
 
         <div class="settings-body">

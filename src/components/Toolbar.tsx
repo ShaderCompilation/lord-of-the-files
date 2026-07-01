@@ -2,6 +2,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { createMemo } from "solid-js";
 
 import * as s from "../store";
+import { Button, Checkbox } from "./common";
 
 export function Toolbar(props: { onToggleHistory: () => void; onToggleSettings: () => void }) {
   const addFiles = async () => {
@@ -30,38 +31,23 @@ export function Toolbar(props: { onToggleHistory: () => void; onToggleSettings: 
       <div class="brand">🗂️ Lord of the Files</div>
 
       <div class="toolbar-group">
-        <button type="button" onClick={addFiles}>Add files</button>
-        <button type="button" onClick={addFolder}>Add folder</button>
-        <button type="button" class="ghost" onClick={s.clearFiles} disabled={s.files().length === 0}>
+        <Button onClick={addFiles}>Add files</Button>
+        <Button onClick={addFolder}>Add folder</Button>
+        <Button variant="ghost" onClick={s.clearFiles} disabled={s.files().length === 0}>
           Clear
-        </button>
+        </Button>
       </div>
 
       <div class="toolbar-group">
-        <label class="check">
-          <input
-            type="checkbox"
-            checked={s.recursive()}
-            onChange={(e) => s.setRecursive(e.currentTarget.checked)}
-          />
+        <Checkbox checked={s.recursive()} onChange={s.setRecursive}>
           Recursive
-        </label>
-        <label class="check">
-          <input
-            type="checkbox"
-            checked={s.preserveExt()}
-            onChange={(e) => s.setPreserveExt(e.currentTarget.checked)}
-          />
+        </Checkbox>
+        <Checkbox checked={s.preserveExt()} onChange={s.setPreserveExt}>
           Preserve extension
-        </label>
-        <label class="check">
-          <input
-            type="checkbox"
-            checked={s.includeDirs()}
-            onChange={(e) => s.setIncludeDirs(e.currentTarget.checked)}
-          />
+        </Checkbox>
+        <Checkbox checked={s.includeDirs()} onChange={s.setIncludeDirs}>
           Include folders
-        </label>
+        </Checkbox>
       </div>
 
       <div class="toolbar-spacer" />
@@ -71,20 +57,20 @@ export function Toolbar(props: { onToggleHistory: () => void; onToggleSettings: 
           {stats().changed} to rename
           {stats().blocking > 0 ? ` · ${stats().blocking} blocked` : ""}
         </span>
-        <button type="button" class="ghost" onClick={props.onToggleSettings}>
+        <Button variant="ghost" onClick={props.onToggleSettings}>
           Settings
-        </button>
-        <button type="button" class="ghost" onClick={props.onToggleHistory}>
+        </Button>
+        <Button variant="ghost" onClick={props.onToggleHistory}>
           History
-        </button>
-        <button type="button"
-          class="primary"
+        </Button>
+        <Button
+          variant="primary"
           onClick={s.applyAll}
           disabled={stats().changed === 0 || stats().blocking > 0}
           title={stats().blocking > 0 ? "Resolve conflicts before applying" : ""}
         >
           Apply rename
-        </button>
+        </Button>
       </div>
     </header>
   );

@@ -4,6 +4,7 @@ import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import "./App.css";
 import * as s from "./store";
 import { log } from "./lib/log";
+import { Button } from "./components/common";
 import { Toolbar } from "./components/Toolbar";
 import { FileTable } from "./components/FileTable";
 import { PipelineEditor } from "./components/PipelineEditor";
@@ -52,9 +53,9 @@ export default function App() {
       <Show when={s.notice()}>
         <div class="notice">
           <span>{s.notice()}</span>
-          <button type="button" class="notice-close" onClick={() => s.setNotice(null)} title="Dismiss">
+          <Button class="notice-close" onClick={() => s.setNotice(null)} title="Dismiss">
             ✕
-          </button>
+          </Button>
         </div>
       </Show>
 

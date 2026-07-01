@@ -1,6 +1,7 @@
 import { For, Show } from "solid-js";
 
 import * as s from "../../store";
+import { Button } from "../common";
 import { GeneralSettings } from "./GeneralSettings";
 import { ProfileCard } from "./ProfileCard";
 
@@ -12,9 +13,9 @@ export function ProfileList(props: { onAdd: () => void; onEdit: (id: string) => 
       <p class="muted small settings-intro">
         Bring your own key — configure a provider to use AI Rename.
       </p>
-      <button type="button" class="primary settings-add" onClick={props.onAdd}>
+      <Button variant="primary" class="settings-add" onClick={props.onAdd}>
         + Add provider
-      </button>
+      </Button>
 
       <Show
         when={s.settings().profiles.length > 0}

@@ -1,5 +1,6 @@
 import { Show } from "solid-js";
 
+import { Badge, Button } from "../common";
 import type { ProfileEditor } from "./profileEditor";
 
 export function ApiKeyField(props: { editor: ProfileEditor }) {
@@ -19,13 +20,13 @@ export function ApiKeyField(props: { editor: ProfileEditor }) {
         }
       >
         <div class="key-saved">
-          <span class="badge badge-changed">✔ Key saved</span>
-          <button type="button" class="ghost small" onClick={() => e.setReplacingKey(true)}>
+          <Badge variant="changed">✔ Key saved</Badge>
+          <Button variant="ghost" small onClick={() => e.setReplacingKey(true)}>
             Replace
-          </button>
-          <button type="button" class="ghost small" onClick={e.removeKey}>
+          </Button>
+          <Button variant="ghost" small onClick={e.removeKey}>
             Remove
-          </button>
+          </Button>
         </div>
       </Show>
       <Show when={e.keyHint()}>{(hint) => <p class="muted small">{hint()}</p>}</Show>

@@ -2,6 +2,7 @@ import { appLogDir } from "@tauri-apps/api/path";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import * as s from "../../store";
+import { Button, Checkbox } from "../common";
 
 async function openLogs() {
   try {
@@ -16,20 +17,18 @@ export function GeneralSettings() {
   return (
     <section class="settings-general">
       <h3>General</h3>
-      <label class="check">
-        <input
-          type="checkbox"
-          checked={s.settings().debugLogging}
-          onChange={(e) => void s.setDebugLogging(e.currentTarget.checked)}
-        />
+      <Checkbox
+        checked={s.settings().debugLogging}
+        onChange={(v) => void s.setDebugLogging(v)}
+      >
         Enable debug logs
-      </label>
+      </Checkbox>
       <p class="muted small hint">
         Enable to capture detailed logs, then share the file for bug reports.
       </p>
-      <button type="button" class="ghost small" onClick={() => void openLogs()}>
+      <Button variant="ghost" small onClick={() => void openLogs()}>
         Open logs
-      </button>
+      </Button>
     </section>
   );
 }

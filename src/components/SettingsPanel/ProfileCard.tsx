@@ -2,6 +2,7 @@ import { Show, createSignal } from "solid-js";
 
 import type { ProviderProfile } from "../../lib/types";
 import * as s from "../../store";
+import { Badge, Button, Checkbox } from "../common";
 
 export function ProfileCard(props: { profile: ProviderProfile; onEdit: () => void }) {
   const [confirming, setConfirming] = createSignal(false);
@@ -9,45 +10,36 @@ export function ProfileCard(props: { profile: ProviderProfile; onEdit: () => voi
 
   return (
     <li class="provider-card" classList={{ active: active() }}>
-      <label class="check provider-active" title="Use for AI Rename">
-        <input
-          type="radio"
-          name="active-profile"
-          checked={active()}
-          onChange={() => s.setActiveProfile(props.profile.id)}
-        />
-      </label>
-      <button type="button" class="provider-main" onClick={props.onEdit} title="Edit">
+      <Checkbox
+        type="radio"
+        name="active-profile"
+        class="provider-active"
+        title="Use for AI Rename"
+        checked={active()}
+        onChange={() => s.setActiveProfile(props.profile.id)}
+      />
+      <Button class="provider-main" onClick={props.onEdit} title="Edit">
         <span class="provider-name">{props.profile.label || "(unnamed)"}</span>
         <span class="muted small mono">{props.profile.model || "no model set"}</span>
-      </button>
+      </Button>
       <div class="provider-side">
         <Show when={props.profile.hasKey} fallback={<span class="muted small">No key</span>}>
-          <span class="badge badge-changed">Key ✓</span>
+          <Badge variant="changed">Key ✓</Badge>
         </Show>
         <Show
           when={confirming()}
           fallback={
-            <button
-              type="button"
-              class="icon danger"
-              title="Delete profile"
-              onClick={() => setConfirming(true)}
-            >
+            <Button variant="icon" danger title="Delete profile" onClick={() => setConfirming(true)}>
               🗑
-            </button>
+            </Button>
           }
         >
-          <button
-            type="button"
-            class="small confirm-delete"
-            onClick={() => s.deleteProfile(props.profile.id)}
-          >
+          <Button small class="confirm-delete" onClick={() => s.deleteProfile(props.profile.id)}>
             Delete?
-          </button>
-          <button type="button" class="icon" title="Cancel" onClick={() => setConfirming(false)}>
+          </Button>
+          <Button variant="icon" title="Cancel" onClick={() => setConfirming(false)}>
             ✕
-          </button>
+          </Button>
         </Show>
       </div>
     </li>

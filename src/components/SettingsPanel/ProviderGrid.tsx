@@ -1,6 +1,7 @@
 import { For, Show } from "solid-js";
 
 import { PROVIDER_PRESETS } from "../../lib/providers";
+import { Button, TextField } from "../common";
 import type { ProfileEditor } from "./profileEditor";
 
 export function ProviderGrid(props: { editor: ProfileEditor }) {
@@ -11,27 +12,23 @@ export function ProviderGrid(props: { editor: ProfileEditor }) {
       <div class="provider-grid">
         <For each={PROVIDER_PRESETS}>
           {(preset) => (
-            <button
-              type="button"
-              class="provider-tile"
-              classList={{ selected: e.selectedProvider() === preset.label }}
+            <Button
+              class={`provider-tile${e.selectedProvider() === preset.label ? " selected" : ""}`}
               onClick={() => e.selectPreset(preset.label)}
             >
               {preset.label}
-            </button>
+            </Button>
           )}
         </For>
       </div>
       <Show when={e.isCustom()}>
-        <label class="field">
-          Base URL
-          <input
-            class="mono"
-            placeholder="https://…/v1"
-            value={e.draft()?.baseUrl ?? ""}
-            onInput={(ev) => e.update({ baseUrl: ev.currentTarget.value })}
-          />
-        </label>
+        <TextField
+          label="Base URL"
+          mono
+          placeholder="https://…/v1"
+          value={e.draft()?.baseUrl ?? ""}
+          onInput={(v) => e.update({ baseUrl: v })}
+        />
       </Show>
     </div>
   );

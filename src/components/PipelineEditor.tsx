@@ -3,6 +3,7 @@ import { For, Show, createSignal } from "solid-js";
 import * as s from "../store";
 import { STEP_LABELS, STEP_ORDER } from "../lib/steps";
 import { deletePreset, instantiate, loadPresets, savePreset } from "../lib/presets";
+import { Button } from "./common";
 import { StepCard } from "./StepCard";
 
 export function PipelineEditor() {
@@ -40,9 +41,9 @@ export function PipelineEditor() {
       <div class="pipeline-head">
         <h2>Pipeline</h2>
         <Show when={s.pipeline.steps.length > 0}>
-          <button type="button" class="ghost small" onClick={s.clearPipeline}>
+          <Button variant="ghost" small onClick={s.clearPipeline}>
             Clear
-          </button>
+          </Button>
         </Show>
       </div>
 
@@ -51,20 +52,20 @@ export function PipelineEditor() {
           <option value="">Presets…</option>
           <For each={Object.keys(presets())}>{(name) => <option value={name}>{name}</option>}</For>
         </select>
-        <button type="button" class="ghost small" onClick={onSave} disabled={s.pipeline.steps.length === 0}>
+        <Button variant="ghost" small onClick={onSave} disabled={s.pipeline.steps.length === 0}>
           Save
-        </button>
-        <button type="button" class="ghost small" onClick={onDelete} disabled={!selected()}>
+        </Button>
+        <Button variant="ghost" small onClick={onDelete} disabled={!selected()}>
           Delete
-        </button>
+        </Button>
       </div>
 
       <div class="add-steps">
         <For each={STEP_ORDER}>
           {(type) => (
-            <button type="button" class="chip" onClick={() => s.addStep(type)}>
+            <Button variant="chip" onClick={() => s.addStep(type)}>
               + {STEP_LABELS[type]}
-            </button>
+            </Button>
           )}
         </For>
       </div>

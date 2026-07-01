@@ -3,6 +3,7 @@ import { For, Show, createMemo, createSignal } from "solid-js";
 
 import * as s from "../store";
 import type { PreviewRow, RowStatus } from "../lib/types";
+import { Badge, Checkbox } from "./common";
 import { DiffText } from "./DiffText";
 
 const STATUS_LABEL: Record<RowStatus, string> = {
@@ -48,14 +49,9 @@ export function FileTable() {
         }
       >
         <div class="filetable-toolbar">
-          <label class="check">
-            <input
-              type="checkbox"
-              checked={onlyChanged()}
-              onChange={(e) => setOnlyChanged(e.currentTarget.checked)}
-            />
+          <Checkbox checked={onlyChanged()} onChange={setOnlyChanged}>
             Show only changed
-          </label>
+          </Checkbox>
           <span class="muted">{s.files().length} file(s)</span>
         </div>
 
@@ -100,12 +96,9 @@ export function FileTable() {
                       </Show>
                     </div>
                     <div class="td col-status">
-                      <span
-                        class={`badge badge-${row().status}`}
-                        title={row().message ?? ""}
-                      >
+                      <Badge variant={row().status} title={row().message ?? ""}>
                         {STATUS_LABEL[row().status]}
-                      </span>
+                      </Badge>
                     </div>
                   </div>
                 );
