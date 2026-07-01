@@ -78,6 +78,16 @@ html,
   border-color: var(--red);
 }
 
+.mock-ai-pill {
+  color: var(--ai);
+  border-color: var(--ai-border);
+  background: var(--ai-bg);
+  font-weight: 600;
+}
+.mock-ai-pill:hover:not(:disabled) {
+  border-color: var(--ai);
+}
+
 /* ---- Buttons & inputs ---- */
 button {
   background: var(--bg-input);
@@ -925,6 +935,51 @@ textarea:focus {
   border-bottom: 1px solid var(--border);
 }
 .settings-general h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+/* ---- Dev menu ---- */
+.dev-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: 400px;
+  background: var(--bg-elevated);
+  border-left: 1px solid var(--ai-border);
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+}
+.dev-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.dev-panel-head h2 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ai);
+}
+.dev-panel-body {
+  flex: 1;
+  overflow: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dev-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.dev-section h3 {
   margin: 0;
   font-size: 13px;
 }

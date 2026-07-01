@@ -11,7 +11,7 @@ use crate::fs_scan;
 use crate::history::{
     self, ApplyReport, FileCheck, HistoryDb, Operation, RenameEntry, RenameItem, UndoReport,
 };
-use crate::settings::{self, ProviderProfile, SettingsDb, SettingsState};
+use crate::settings::{self, MockAiConfig, ProviderProfile, SettingsDb, SettingsState};
 use crate::types::{AiGenerateReport, AiProgressEvent, FileEntry, Pipeline, PreviewResult};
 
 /// Broadcasts `ai::generate`'s per-chunk progress to the frontend via a Tauri event. Kept
@@ -105,15 +105,16 @@ pub fn preview_redo(db: State<HistoryDb>, op_id: String) -> Result<Vec<FileCheck
 /// Looks up the active profile, erroring with a message pointing at Settings when none is
 /// configured. A profile with no stored key (e.g. a local Ollama server) is still valid —
 /// only the complete absence of an active profile is treated as "not set up".
-fn active_profile(conn: &rusqlite::Connection) -> Result<ProviderProfile, String> {
-    let state = settings::load_state(conn);
+fn active_profile(state: &SettingsState) -> Result<ProviderProfile, String> {
     let active_id = state
         .active_profile_id
+        .as_deref()
         .ok_or_else(|| "No active provider / no key — open Settings".to_string())?;
     state
         .profiles
-        .into_iter()
+        .iter()
         .find(|p| p.id == active_id)
+        .cloned()
         .ok_or_else(|| "No active provider / no key — open Settings".to_string())
 }
 
@@ -125,22 +126,26 @@ pub async fn ai_generate(
     entries: Vec<FileEntry>,
     generation_id: String,
 ) -> Result<AiGenerateReport, String> {
-    let profile = {
+    let (profile, mock) = {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
-        active_profile(&conn)?
+        let state = settings::load_state(&conn);
+        let profile = active_profile(&state)?;
+        let mock = state.mock_ai.enabled.then(|| state.mock_ai.clone());
+        (profile, mock)
     };
     let key = settings::get_api_key(&profile.id).unwrap_or_default();
     let has_key = !key.is_empty();
     log::info!(
-        "ai_generate: generation_id={generation_id}, {} entries, profile_id={}, label={}, has_key={has_key}, prompt_len={}",
+        "ai_generate: generation_id={generation_id}, {} entries, profile_id={}, label={}, has_key={has_key}, mock={}, prompt_len={}",
         entries.len(),
         profile.id,
         profile.label,
+        mock.is_some(),
         prompt.len()
     );
     log::trace!("ai_generate: prompt={prompt}");
     let emitter: Arc<dyn ai::AiProgressEmitter> = Arc::new(TauriProgressEmitter(app));
-    ai::generate(&profile, &key, prompt, entries, &generation_id, emitter).await
+    ai::generate(&profile, &key, prompt, entries, &generation_id, emitter, mock).await
 }
 
 #[tauri::command]
@@ -208,6 +213,25 @@ pub fn set_debug_logging(db: State<SettingsDb>, enabled: bool) -> Result<(), Str
     Ok(())
 }
 
+/// Dev-menu-only: persists the "Mock AI" config. The setting is always stored so it survives
+/// restarts within a dev build, but `ai::generate` only ever acts on it under
+/// `cfg!(debug_assertions)` — a release build ignores it regardless of what's in settings.db.
+#[tauri::command]
+pub fn set_mock_ai_config(db: State<SettingsDb>, config: MockAiConfig) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut state = settings::load_state(&conn);
+    state.mock_ai = config;
+    settings::save_state(&conn, &state)?;
+    log::info!(
+        "set_mock_ai_config: enabled={}, latency_ms={}, fail_rate={}, transform={:?}",
+        state.mock_ai.enabled,
+        state.mock_ai.latency_ms,
+        state.mock_ai.fail_rate,
+        state.mock_ai.transform
+    );
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn test_connection(db: State<'_, SettingsDb>, profile_id: String) -> Result<String, String> {
     log::info!("test_connection: profile_id={profile_id}");
@@ -243,6 +267,7 @@ pub async fn test_connection(db: State<'_, SettingsDb>, profile_id: String) -> R
         entries,
         "test-connection",
         Arc::new(ai::NoopProgressEmitter),
+        None, // always exercises the real provider, even if Mock AI is on
     )
     .await
     .map(|report| {

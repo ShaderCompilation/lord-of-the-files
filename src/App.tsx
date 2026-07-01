@@ -10,10 +10,12 @@ import { FileTable } from "./components/FileTable";
 import { PipelineEditor } from "./components/PipelineEditor";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { DevMenu } from "./components/DevMenu";
 
 export default function App() {
   const [historyOpen, setHistoryOpen] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+  const [devMenuOpen, setDevMenuOpen] = createSignal(false);
 
   // Debounced live preview: recompute whenever files or the pipeline change.
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -48,6 +50,7 @@ export default function App() {
       <Toolbar
         onToggleHistory={() => setHistoryOpen((v) => !v)}
         onToggleSettings={() => setSettingsOpen((v) => !v)}
+        onToggleDevMenu={() => setDevMenuOpen((v) => !v)}
       />
 
       <Show when={s.notice()}>
@@ -66,6 +69,9 @@ export default function App() {
 
       <HistoryPanel open={historyOpen()} onClose={() => setHistoryOpen(false)} />
       <SettingsPanel open={settingsOpen()} onClose={() => setSettingsOpen(false)} />
+      <Show when={import.meta.env.DEV}>
+        <DevMenu open={devMenuOpen()} onClose={() => setDevMenuOpen(false)} />
+      </Show>
     </div>
   );
 }

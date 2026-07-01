@@ -8,6 +8,7 @@ import type {
   ApplyReport,
   FileCheck,
   FileEntry,
+  MockAiConfig,
   Operation,
   Pipeline,
   PreviewResult,
@@ -99,4 +100,8 @@ export function testConnection(profileId: string): Promise<string> {
 
 export function setDebugLogging(enabled: boolean): Promise<void> {
   return invoke("set_debug_logging", { enabled });
+}
+
+export function setMockAiConfig(config: MockAiConfig): Promise<void> {
+  return invoke("set_mock_ai_config", { config });
 }

@@ -94,7 +94,6 @@ undo/redo) → `refreshHistory`.
   choice, chunking/reconciliation, settings/keychain layout, prompt contract).
 - `docs/logging.md` — design for the unified frontend+backend debug logging system.
 
-
 ##
 
-- Don't try to check the UI visually(via screenshots, MCP or other tools) unless specifically instructed to.
+- Don't try to check the UI visually(via screenshots, MCP or other tools) unless specifically instructed to, in which case you can use browser and check the ui here http://localhost:1420/.

@@ -15,7 +15,7 @@ use aisdk::providers::OpenAICompatible;
 use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 
-use crate::settings::ProviderProfile;
+use crate::settings::{MockAiConfig, MockTransform, ProviderProfile};
 use crate::types::{AiGenerateReport, AiProgressEvent, AiResultItem, FileEntry};
 
 /// Placeholder sent when a profile has no key configured (e.g. local Ollama / LM Studio),
@@ -43,18 +43,31 @@ pub async fn generate(
     entries: Vec<FileEntry>,
     generation_id: &str,
     emitter: Arc<dyn AiProgressEmitter>,
+    mock: Option<MockAiConfig>,
 ) -> Result<AiGenerateReport, String> {
+    // Belt-and-suspenders: a release binary never mocks, even if `enabled` was left on in
+    // settings.db by a previous dev build, or a command were invoked directly.
+    let mock = if cfg!(debug_assertions) { mock } else { None };
+
     let key = if api_key.is_empty() {
         NO_KEY_PLACEHOLDER
     } else {
         api_key
     };
-    let provider = OpenAICompatible::<DynamicModel>::builder()
-        .base_url(&cfg.base_url)
-        .api_key(key)
-        .model_name(&cfg.model)
-        .build()
-        .map_err(|e| e.to_string())?;
+    // Skip building a real client entirely when mocking — `cfg.base_url`/`model` don't need to
+    // be valid (or even set) for a mocked generation.
+    let provider = if mock.is_none() {
+        Some(
+            OpenAICompatible::<DynamicModel>::builder()
+                .base_url(&cfg.base_url)
+                .api_key(key)
+                .model_name(&cfg.model)
+                .build()
+                .map_err(|e| e.to_string())?,
+        )
+    } else {
+        None
+    };
 
     let chunk_size = (cfg.chunk_size as usize).max(1);
     let concurrency = (cfg.concurrency as usize).max(1);
@@ -65,11 +78,13 @@ pub async fn generate(
     let chunks = chunk_entries(entries, chunk_size);
     let total_chunks = chunks.len();
     let has_key = !api_key.is_empty();
+    let mock_on = mock.is_some();
 
     log::info!(
         "ai::generate: generation_id={generation_id}, {entry_count} entries, {total_chunks} chunk(s), \
          profile_id={profile_id}, has_key={has_key}, base_url={base_url}, model={model}, \
-         chunk_size={chunk_size}, concurrency={concurrency}, timeout_secs={timeout_secs}, max_len={max_len}",
+         chunk_size={chunk_size}, concurrency={concurrency}, timeout_secs={timeout_secs}, max_len={max_len}, \
+         mock={mock_on}",
         profile_id = cfg.id,
         base_url = cfg.base_url,
         model = cfg.model,
@@ -81,6 +96,7 @@ pub async fn generate(
 
     let tasks = chunks.into_iter().enumerate().map(|(chunk_index, chunk)| {
         let provider = provider.clone();
+        let mock = mock.clone();
         let system = system.clone();
         let user = user_prompt(&prompt, &chunk, chunk_index * chunk_size);
         let ids: HashSet<String> = chunk.iter().map(|e| e.id.clone()).collect();
@@ -98,7 +114,13 @@ pub async fn generate(
             log::trace!("ai::generate: chunk {chunk_index} user_prompt={user}");
 
             let started = Instant::now();
-            let outcome = run_chunk(provider, system, user, timeout, chunk_index).await;
+            let outcome = match &mock {
+                Some(mock_cfg) => run_mock_chunk(mock_cfg, &chunk, chunk_index).await,
+                None => {
+                    let provider = provider.expect("provider is built whenever mocking is off");
+                    run_chunk(provider, system, user, timeout, chunk_index).await
+                }
+            };
             let elapsed_ms = started.elapsed().as_millis();
 
             let outcome = outcome.map(|parsed| {
@@ -225,6 +247,62 @@ async fn run_chunk(
             log::trace!("ai::generate: chunk {chunk_index} response={text}");
             extract_results(&text).map(|(items, parse_path)| ParsedChunk { items, parse_path })
         }
+    }
+}
+
+/// Simulates one chunk of a provider round trip for the Dev menu's "Mock AI" toggle: optional
+/// artificial latency, then either a simulated failure or a deterministic transform of each
+/// file's stem. No network involved, so this runs through the same reconcile/logging path a
+/// real chunk would (see `generate`), just without the HTTP request.
+async fn run_mock_chunk(
+    mock: &MockAiConfig,
+    chunk: &[FileEntry],
+    chunk_index: usize,
+) -> Result<ParsedChunk, String> {
+    if mock.latency_ms > 0 {
+        tokio::time::sleep(Duration::from_millis(mock.latency_ms as u64)).await;
+    }
+    if mock.fail_rate > 0.0 && mock_roll() < mock.fail_rate {
+        log::debug!("ai::mock: chunk {chunk_index} simulating a provider failure");
+        return Err("Mock AI: simulated provider failure".to_string());
+    }
+    let items = chunk
+        .iter()
+        .map(|e| AiResultItem {
+            id: e.id.clone(),
+            new_name: apply_mock_transform(mock.transform, &e.stem),
+        })
+        .collect();
+    Ok(ParsedChunk {
+        items,
+        parse_path: ParsePath::WrappedObject,
+    })
+}
+
+/// A `rand`-free pseudo-random float in `[0, 1)`, seeded from the system clock. Fine for "fail
+/// roughly X% of mocked chunks" in dev tooling — never used anywhere security-sensitive.
+fn mock_roll() -> f32 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    (nanos % 1_000_000) as f32 / 1_000_000.0
+}
+
+fn apply_mock_transform(transform: MockTransform, stem: &str) -> String {
+    match transform {
+        MockTransform::Suffix => format!("{stem}_mock"),
+        MockTransform::Uppercase => stem.to_uppercase(),
+        MockTransform::Lowercase => stem.to_lowercase(),
+        MockTransform::Reverse => stem.chars().rev().collect(),
+        MockTransform::Slugify => stem
+            .chars()
+            .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+            .collect::<String>()
+            .split('-')
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("-"),
     }
 }
 
@@ -651,6 +729,7 @@ mod tests {
             vec![entry("a", "old", "txt")],
             "test-gen",
             Arc::new(NoopProgressEmitter),
+            None,
         )
         .await
         .unwrap();
@@ -679,6 +758,7 @@ mod tests {
             entries,
             "test-gen",
             Arc::new(NoopProgressEmitter),
+            None,
         )
         .await
         .unwrap_err();
@@ -714,6 +794,7 @@ mod tests {
             entries,
             "test-gen",
             Arc::new(NoopProgressEmitter),
+            None,
         )
         .await
         .unwrap();
@@ -747,9 +828,72 @@ mod tests {
             entries,
             "test-gen",
             Arc::new(NoopProgressEmitter),
+            None,
         )
         .await
         .unwrap_err();
         assert!(err.contains("Timed out"));
+    }
+
+    // ---- Mock AI (Dev menu) -----------------------------------------------------------
+
+    #[tokio::test]
+    async fn mock_generate_applies_transform_without_hitting_network() {
+        // An unroutable base_url: if mocking somehow fell through to a real request, this
+        // would fail/hang instead of returning the expected mocked result.
+        let cfg = test_profile("http://127.0.0.1:1".to_string());
+        let mock = MockAiConfig {
+            enabled: true,
+            latency_ms: 0,
+            fail_rate: 0.0,
+            transform: MockTransform::Uppercase,
+        };
+        let report = generate(
+            &cfg,
+            "",
+            "rename".to_string(),
+            vec![entry("a", "old", "txt")],
+            "test-gen",
+            Arc::new(NoopProgressEmitter),
+            Some(mock),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(report.failed_chunks, 0);
+        assert_eq!(report.results.len(), 1);
+        assert_eq!(report.results[0].new_name, "OLD");
+    }
+
+    #[tokio::test]
+    async fn mock_generate_fail_rate_one_always_fails() {
+        let cfg = test_profile("http://127.0.0.1:1".to_string());
+        let mock = MockAiConfig {
+            enabled: true,
+            latency_ms: 0,
+            fail_rate: 1.0,
+            transform: MockTransform::Suffix,
+        };
+        let err = generate(
+            &cfg,
+            "",
+            "rename".to_string(),
+            vec![entry("a", "old", "txt")],
+            "test-gen",
+            Arc::new(NoopProgressEmitter),
+            Some(mock),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("simulated"));
+    }
+
+    #[test]
+    fn apply_mock_transform_variants() {
+        assert_eq!(apply_mock_transform(MockTransform::Suffix, "photo"), "photo_mock");
+        assert_eq!(apply_mock_transform(MockTransform::Uppercase, "photo"), "PHOTO");
+        assert_eq!(apply_mock_transform(MockTransform::Lowercase, "PHOTO"), "photo");
+        assert_eq!(apply_mock_transform(MockTransform::Reverse, "abc"), "cba");
+        assert_eq!(apply_mock_transform(MockTransform::Slugify, "My Photo!!"), "my-photo");
     }
 }

@@ -15,6 +15,7 @@ import type {
   FileCheck,
   Failure,
   FileEntry,
+  MockAiConfig,
   Operation,
   PreviewResult,
   ProviderProfile,
@@ -584,6 +585,7 @@ const [settings, setSettings] = createSignal<SettingsState>({
   profiles: [],
   activeProfileId: null,
   debugLogging: false,
+  mockAi: { enabled: false, latencyMs: 500, failRate: 0, transform: "suffix" },
 });
 export { settings };
 
@@ -677,5 +679,21 @@ export async function setDebugLogging(enabled: boolean): Promise<void> {
   } catch (e) {
     log.error(`setDebugLogging failed: ${String(e)}`);
     setNotice(`Could not update debug logging: ${String(e)}`);
+  }
+}
+
+// ---- Dev menu: Mock AI ------------------------------------------------------------------
+
+export async function setMockAiConfig(config: MockAiConfig): Promise<void> {
+  try {
+    await ipc.setMockAiConfig(config);
+    log.info(
+      `setMockAiConfig: enabled=${config.enabled}, latencyMs=${config.latencyMs}, ` +
+        `failRate=${config.failRate}, transform=${config.transform}`,
+    );
+    await loadSettings();
+  } catch (e) {
+    log.error(`setMockAiConfig failed: ${String(e)}`);
+    setNotice(`Could not update Mock AI config: ${String(e)}`);
   }
 }

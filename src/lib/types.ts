@@ -158,10 +158,23 @@ export interface ProviderProfile {
   hasKey: boolean;
 }
 
+// Dev menu: simulated AI backend (see src-tauri/src/settings.rs::MockAiConfig). Persisted, but
+// only ever honoured by the Rust side in debug builds.
+export type MockTransform = "suffix" | "uppercase" | "lowercase" | "reverse" | "slugify";
+
+export interface MockAiConfig {
+  enabled: boolean;
+  latencyMs: number;
+  /** 0-1 chance that any given chunk simulates a provider failure. */
+  failRate: number;
+  transform: MockTransform;
+}
+
 export interface SettingsState {
   profiles: ProviderProfile[];
   activeProfileId: string | null;
   debugLogging: boolean;
+  mockAi: MockAiConfig;
 }
 
 export interface AiGenerateReport {

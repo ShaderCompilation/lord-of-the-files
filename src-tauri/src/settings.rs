@@ -55,6 +55,54 @@ pub struct SettingsState {
     pub active_profile_id: Option<String>,
     #[serde(default)]
     pub debug_logging: bool,
+    #[serde(default)]
+    pub mock_ai: MockAiConfig,
+}
+
+/// How a mocked chunk turns each file's stem into a "suggestion" — see [`MockAiConfig`].
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum MockTransform {
+    #[default]
+    Suffix,
+    Uppercase,
+    Lowercase,
+    Reverse,
+    Slugify,
+}
+
+fn default_mock_latency_ms() -> u32 {
+    500
+}
+
+/// Dev-only simulated AI backend, so the BYOK rename flow (chunking, progress events,
+/// partial/full-failure handling, reconciliation) can be exercised without a real provider or
+/// API cost. Persisted like any other setting (so the Dev menu survives a restart), but
+/// `ai::generate` only ever honours `enabled` inside `cfg!(debug_assertions)` builds — a
+/// release binary ignores it even if a dev build previously left it on in the same settings.db.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MockAiConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_mock_latency_ms")]
+    pub latency_ms: u32,
+    /// Chance (0.0-1.0) that any given chunk simulates a provider failure.
+    #[serde(default)]
+    pub fail_rate: f32,
+    #[serde(default)]
+    pub transform: MockTransform,
+}
+
+impl Default for MockAiConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            latency_ms: default_mock_latency_ms(),
+            fail_rate: 0.0,
+            transform: MockTransform::default(),
+        }
+    }
 }
 
 pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
@@ -161,6 +209,12 @@ mod tests {
             }],
             active_profile_id: Some("p1".into()),
             debug_logging: true,
+            mock_ai: MockAiConfig {
+                enabled: true,
+                latency_ms: 250,
+                fail_rate: 0.25,
+                transform: MockTransform::Uppercase,
+            },
         };
         save_state(&conn, &state).unwrap();
         let loaded = load_state(&conn);
@@ -168,6 +222,7 @@ mod tests {
         assert_eq!(loaded.profiles.len(), 1);
         assert_eq!(loaded.profiles[0].label, "OpenRouter");
         assert!(loaded.debug_logging);
+        assert_eq!(loaded.mock_ai, state.mock_ai);
     }
 
     #[test]
@@ -180,6 +235,19 @@ mod tests {
         .unwrap();
         let loaded = load_state(&conn);
         assert!(!loaded.debug_logging);
+    }
+
+    #[test]
+    fn mock_ai_defaults_to_disabled_when_blob_missing_key() {
+        let conn = mem_db();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('state', '{\"profiles\":[],\"activeProfileId\":null}')",
+            [],
+        )
+        .unwrap();
+        let loaded = load_state(&conn);
+        assert!(!loaded.mock_ai.enabled);
+        assert_eq!(loaded.mock_ai.transform, MockTransform::Suffix);
     }
 
     #[test]

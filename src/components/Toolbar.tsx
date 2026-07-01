@@ -6,10 +6,12 @@ import { Button, Checkbox } from "./common";
 export function Toolbar(props: {
   onToggleHistory: () => void;
   onToggleSettings: () => void;
+  onToggleDevMenu: () => void;
 }) {
   const hasFiles = () => s.files().length > 0;
   const applicable = createMemo(() => s.applicableRows().length);
   const conflicts = createMemo(() => s.previewCounts().conflict);
+  const mockAiOn = () => import.meta.env.DEV && s.settings().mockAi.enabled;
 
   const jumpToConflicts = () => s.setTableFilter("conflict");
 
@@ -40,6 +42,21 @@ export function Toolbar(props: {
 
       <div class="toolbar-spacer" />
 
+      <Show when={mockAiOn()}>
+        <Button
+          class="mock-ai-pill"
+          onClick={props.onToggleDevMenu}
+          title="AI renames are simulated — open the Dev menu to change this"
+        >
+          🧪 Mock AI
+        </Button>
+      </Show>
+
+      <Show when={import.meta.env.DEV}>
+        <Button variant="ghost" onClick={props.onToggleDevMenu}>
+          Dev
+        </Button>
+      </Show>
       <Button variant="ghost" onClick={props.onToggleSettings}>
         Settings
       </Button>
