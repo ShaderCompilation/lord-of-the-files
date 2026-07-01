@@ -1,7 +1,12 @@
 import { For, Show, createSignal } from "solid-js";
 
 import * as s from "../store";
-import { STEP_DESCRIPTIONS, STEP_GROUPS, STEP_ICONS, STEP_LABELS } from "../lib/steps";
+import {
+  STEP_DESCRIPTIONS,
+  STEP_GROUPS,
+  STEP_ICONS,
+  STEP_LABELS,
+} from "../lib/steps";
 import type { StepType } from "../lib/types";
 import { Button } from "./common";
 
@@ -16,12 +21,14 @@ export function AddStepMenu(props: { label?: string; class?: string }) {
 
   return (
     <div class="addstep">
-      <Button class={props.class ?? "addstep-trigger"} onClick={() => setOpen((v) => !v)}>
+      <Button
+        class={props.class ?? "addstep-trigger"}
+        onClick={() => setOpen((v) => !v)}
+      >
         {props.label ?? "+ Add step"}
       </Button>
 
       <Show when={open()}>
-        <button class="menu-backdrop" aria-label="Close menu" onClick={() => setOpen(false)} />
         <div class="addstep-menu" role="menu">
           <For each={STEP_GROUPS}>
             {(group) => (
@@ -40,8 +47,12 @@ export function AddStepMenu(props: { label?: string; class?: string }) {
                         {STEP_ICONS[type]}
                       </span>
                       <span class="addstep-item-text">
-                        <span class="addstep-item-title">{STEP_LABELS[type]}</span>
-                        <span class="addstep-item-desc">{STEP_DESCRIPTIONS[type]}</span>
+                        <span class="addstep-item-title">
+                          {STEP_LABELS[type]}
+                        </span>
+                        <span class="addstep-item-desc">
+                          {STEP_DESCRIPTIONS[type]}
+                        </span>
                       </span>
                     </button>
                   )}

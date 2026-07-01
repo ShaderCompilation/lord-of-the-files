@@ -15,7 +15,12 @@
   --ai: #a879ff;
   --ai-bg: rgba(168, 121, 255, 0.16);
   --ai-border: rgba(168, 121, 255, 0.5);
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
   font-size: 14px;
   color-scheme: dark;
 }
@@ -928,4 +933,10 @@ textarea:focus {
 }
 .test-error {
   color: var(--red);
+}
+
+/* Utility classes */
+
+.text-center {
+  text-align: center;
 }
