@@ -410,12 +410,17 @@ function setAiBusy(stepId: string, busy: boolean) {
 
 export async function generateAi(stepId: string, prompt: string): Promise<void> {
   const entries = files();
-  if (entries.length === 0 || !prompt.trim()) return;
+  if (entries.length === 0 || !prompt.trim()) {
+    log.debug(`generateAi: skipped step=${stepId} (empty files or prompt)`);
+    return;
+  }
   if (!activeProfile()) {
+    log.debug(`generateAi: skipped step=${stepId} (no active provider)`);
     setNotice("No active provider — open Settings to add one.");
     return;
   }
   const generationId = crypto.randomUUID();
+  const profile = activeProfile()!;
   setAiGenerationId((prev) => new Map(prev).set(stepId, generationId));
   setAiStepError((prev) => {
     const next = new Map(prev);
@@ -426,13 +431,21 @@ export async function generateAi(stepId: string, prompt: string): Promise<void> 
     new Map(prev).set(stepId, { completedChunks: 0, totalChunks: 0, suggestedSoFar: 0 }),
   );
   setAiBusy(stepId, true);
-  log.info(`generateAi: step=${stepId}, ${entries.length} entries, generation=${generationId}`);
+  log.info(
+    `generateAi: step=${stepId}, generation=${generationId}, ${entries.length} entries, ` +
+      `profile=${profile.id}, model=${profile.model}`,
+  );
+  log.trace(`generateAi: prompt=${prompt}`);
 
   const isLive = () => aiGenerationId().get(stepId) === generationId;
 
   const unlisten = await listen<AiProgressEvent>("ai-generate-progress", (e) => {
     const p = e.payload;
     if (p.generationId !== generationId || !isLive()) return;
+    log.debug(
+      `generateAi progress: chunk ${p.chunkIndex + 1}/${p.totalChunks} ok=${p.chunkOk} ` +
+        `results=${p.chunkResultCount}${p.chunkError ? ` err=${p.chunkError}` : ""}`,
+    );
     setAiProgress((prev) => {
       const cur = prev.get(stepId) ?? {
         completedChunks: 0,
@@ -450,14 +463,36 @@ export async function generateAi(stepId: string, prompt: string): Promise<void> 
 
   try {
     const report = await ipc.aiGenerate(prompt, entries, generationId);
-    if (!isLive()) return; // cancelled while in flight — discard
+    if (!isLive()) {
+      log.debug(`generateAi: discarding stale result for generation=${generationId}`);
+      return;
+    }
     setStepResults(stepId, report.results);
+    log.info(
+      `generateAi done: step=${stepId}, generation=${generationId}, ${report.results.length} result(s), ` +
+        `failed_chunks=${report.failedChunks}/${report.totalChunks}`,
+    );
+    if (report.warning) {
+      log.warn(`generateAi partial: step=${stepId}, generation=${generationId}: ${report.warning}`);
+    }
+    const stems = new Map(entries.map((e) => [e.id, e.stem]));
+    const previewLimit = 50;
+    for (const r of report.results.slice(0, previewLimit)) {
+      const old = stems.get(r.id) ?? "?";
+      log.debug(`generateAi rename: ${r.id} "${old}" -> "${r.newName}"`);
+    }
+    if (report.results.length > previewLimit) {
+      log.debug(`generateAi rename: … and ${report.results.length - previewLimit} more`);
+    }
     if (report.warning) {
       setAiStepError((prev) => new Map(prev).set(stepId, report.warning!));
     }
     setNotice(report.warning ?? `AI suggested ${report.results.length} name(s).`);
   } catch (e) {
-    if (!isLive()) return;
+    if (!isLive()) {
+      log.debug(`generateAi: ignoring error for cancelled generation=${generationId}`);
+      return;
+    }
     log.error(`generateAi failed: ${String(e)}`);
     setAiStepError((prev) => new Map(prev).set(stepId, String(e)));
     setNotice(`AI request failed: ${String(e)}`);
@@ -475,6 +510,7 @@ export async function generateAi(stepId: string, prompt: string): Promise<void> 
 }
 
 export function cancelAi(stepId: string): void {
+  const generationId = aiGenerationId().get(stepId);
   setAiGenerationId((prev) => {
     const next = new Map(prev);
     next.delete(stepId);
@@ -486,7 +522,9 @@ export function cancelAi(stepId: string): void {
     next.delete(stepId);
     return next;
   });
-  log.info(`cancelAi: step=${stepId}`);
+  log.info(
+    `cancelAi: step=${stepId}${generationId ? `, generation=${generationId}` : ""}`,
+  );
 }
 
 // ---- Settings / providers ---------------------------------------------------------------

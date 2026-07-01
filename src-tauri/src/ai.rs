@@ -8,7 +8,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use aisdk::core::{DynamicModel, LanguageModelRequest};
 use aisdk::providers::OpenAICompatible;
@@ -60,34 +60,57 @@ pub async fn generate(
     let concurrency = (cfg.concurrency as usize).max(1);
     let timeout = Duration::from_secs(cfg.timeout_secs.max(1) as u64);
     let system = system_prompt(cfg.max_len);
+    let entry_count = entries.len();
 
     let chunks = chunk_entries(entries, chunk_size);
     let total_chunks = chunks.len();
+    let has_key = !api_key.is_empty();
 
     log::info!(
-        "ai::generate: {} chunk(s), base_url={}, model={}",
-        total_chunks,
-        cfg.base_url,
-        cfg.model
+        "ai::generate: generation_id={generation_id}, {entry_count} entries, {total_chunks} chunk(s), \
+         profile_id={profile_id}, has_key={has_key}, base_url={base_url}, model={model}, \
+         chunk_size={chunk_size}, concurrency={concurrency}, timeout_secs={timeout_secs}, max_len={max_len}",
+        profile_id = cfg.id,
+        base_url = cfg.base_url,
+        model = cfg.model,
+        timeout_secs = cfg.timeout_secs,
+        max_len = cfg.max_len,
     );
-    log::trace!("ai::generate: prompt={prompt}");
+    log::trace!("ai::generate: instruction={prompt}");
+    log::trace!("ai::generate: system={system}");
 
     let tasks = chunks.into_iter().enumerate().map(|(chunk_index, chunk)| {
         let provider = provider.clone();
         let system = system.clone();
         let user = user_prompt(&prompt, &chunk, chunk_index * chunk_size);
         let ids: HashSet<String> = chunk.iter().map(|e| e.id.clone()).collect();
+        let stems: HashMap<String, String> =
+            chunk.iter().map(|e| (e.id.clone(), e.stem.clone())).collect();
         let exts: HashMap<String, String> =
             chunk.iter().map(|e| (e.id.clone(), e.ext.clone())).collect();
         let gen_id = generation_id.to_string();
         let emitter = Arc::clone(&emitter);
         async move {
-            log::debug!("ai::generate: chunk {chunk_index} dispatching");
-            let outcome = run_chunk(provider, system, user, timeout)
-                .await
-                .map(|items| reconcile(items, &ids, &exts));
+            log::debug!(
+                "ai::generate: chunk {chunk_index}/{total_chunks} dispatching {} file(s)",
+                chunk.len()
+            );
+            log::trace!("ai::generate: chunk {chunk_index} user_prompt={user}");
+
+            let started = Instant::now();
+            let outcome = run_chunk(provider, system, user, timeout, chunk_index).await;
+            let elapsed_ms = started.elapsed().as_millis();
+
+            let outcome = outcome.map(|parsed| {
+                let report = reconcile(parsed.items, &ids, &stems, &exts);
+                log_chunk_reconcile(chunk_index, &report, &stems, parsed.parse_path, elapsed_ms);
+                report.items
+            });
+
             if let Err(e) = &outcome {
-                log::warn!("ai::generate: chunk {chunk_index} failed: {e}");
+                log::warn!(
+                    "ai::generate: chunk {chunk_index} failed after {elapsed_ms}ms: {e}"
+                );
             }
 
             let chunk_ok = outcome.is_ok();
@@ -124,7 +147,9 @@ pub async fn generate(
     }
 
     if total_chunks > 0 && failed_chunks as usize == total_chunks {
-        return Err(first_error.unwrap_or_else(|| "AI generation failed".to_string()));
+        let err = first_error.unwrap_or_else(|| "AI generation failed".to_string());
+        log::warn!("ai::generate: generation_id={generation_id} all chunks failed: {err}");
+        return Err(err);
     }
 
     let warning = (failed_chunks > 0).then(|| {
@@ -135,6 +160,14 @@ pub async fn generate(
             total_chunks
         )
     });
+
+    if let Some(ref w) = warning {
+        log::warn!("ai::generate: generation_id={generation_id} partial success: {w}");
+    }
+    log::info!(
+        "ai::generate: generation_id={generation_id} done — {} result(s), {failed_chunks}/{total_chunks} chunk(s) failed",
+        results.len()
+    );
 
     Ok(AiGenerateReport {
         results,
@@ -161,7 +194,8 @@ async fn run_chunk(
     system: String,
     prompt: String,
     timeout: Duration,
-) -> Result<Vec<AiResultItem>, String> {
+    chunk_index: usize,
+) -> Result<ParsedChunk, String> {
     let attempt = async {
         let mut req = LanguageModelRequest::builder()
             .model(provider)
@@ -173,15 +207,120 @@ async fn run_chunk(
     };
 
     match tokio::time::timeout(timeout, attempt).await {
-        Err(_) => Err(format!("Timed out after {}s", timeout.as_secs())),
-        Ok(Err(e)) => Err(friendly_error(e)),
+        Err(_) => {
+            log::warn!(
+                "ai::generate: chunk {chunk_index} timed out after {}s",
+                timeout.as_secs()
+            );
+            Err(format!("Timed out after {}s", timeout.as_secs()))
+        }
+        Ok(Err(e)) => {
+            log_api_error(chunk_index, &e);
+            Err(friendly_error(e))
+        }
         Ok(Ok(resp)) => {
             let text = resp
                 .text()
                 .ok_or_else(|| "Model returned no text content".to_string())?;
-            log::trace!("ai::generate: response={text}");
-            extract_results(&text)
+            log::trace!("ai::generate: chunk {chunk_index} response={text}");
+            extract_results(&text).map(|(items, parse_path)| ParsedChunk { items, parse_path })
         }
+    }
+}
+
+fn log_api_error(chunk_index: usize, e: &aisdk::Error) {
+    if let aisdk::Error::ApiError {
+        status_code: Some(code),
+        details,
+        ..
+    } = e
+    {
+        log::warn!(
+            "ai::generate: chunk {chunk_index} API error status={} details={details}",
+            code.as_u16(),
+        );
+    } else {
+        log::warn!("ai::generate: chunk {chunk_index} provider error: {e}");
+    }
+}
+
+struct ParsedChunk {
+    items: Vec<AiResultItem>,
+    parse_path: ParsePath,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ParsePath {
+    WrappedObject,
+    BareArray,
+    SubstringWrapped,
+    SubstringArray,
+}
+
+impl ParsePath {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::WrappedObject => "wrapped_object",
+            Self::BareArray => "bare_array",
+            Self::SubstringWrapped => "substring_wrapped",
+            Self::SubstringArray => "substring_array",
+        }
+    }
+}
+
+struct ReconcileReport {
+    items: Vec<AiResultItem>,
+    model_count: usize,
+    dropped_unknown: usize,
+    sanitized_count: usize,
+    missing_ids: Vec<String>,
+}
+
+fn log_chunk_reconcile(
+    chunk_index: usize,
+    report: &ReconcileReport,
+    stems: &HashMap<String, String>,
+    parse_path: ParsePath,
+    elapsed_ms: u128,
+) {
+    log::debug!(
+        "ai::generate: chunk {chunk_index} ok in {elapsed_ms}ms — parse={}, model_returned={}, \
+         kept={}, dropped_unknown={}, sanitized={}, missing={}",
+        parse_path.as_str(),
+        report.model_count,
+        report.items.len(),
+        report.dropped_unknown,
+        report.sanitized_count,
+        report.missing_ids.len()
+    );
+    if !report.missing_ids.is_empty() {
+        log::debug!(
+            "ai::generate: chunk {chunk_index} missing ids (engine will keep original name): {:?}",
+            report.missing_ids
+        );
+    }
+    for item in &report.items {
+        let old = stems.get(&item.id).map(String::as_str).unwrap_or("?");
+        if old != item.new_name {
+            log::debug!(
+                "ai::generate: chunk {chunk_index} rename id={} \"{old}\" -> \"{}\"",
+                item.id,
+                item.new_name
+            );
+        } else {
+            log::trace!(
+                "ai::generate: chunk {chunk_index} unchanged id={} \"{old}\"",
+                item.id
+            );
+        }
+    }
+}
+
+fn trunc_log(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}… ({} chars total)", &s[..max], s.len())
     }
 }
 
@@ -206,14 +345,14 @@ struct Wrapped {
 /// Lenient JSON extraction: try `{"results":[...]}`, then a bare array, then fall back to
 /// the substring between the first `{`/`[` and the last `}`/`]` (handles ```json fences and
 /// prose wrapping the model may add despite instructions).
-fn extract_results(text: &str) -> Result<Vec<AiResultItem>, String> {
+fn extract_results(text: &str) -> Result<(Vec<AiResultItem>, ParsePath), String> {
     let trimmed = text.trim();
 
     if let Ok(w) = serde_json::from_str::<Wrapped>(trimmed) {
-        return Ok(w.results);
+        return Ok((w.results, ParsePath::WrappedObject));
     }
     if let Ok(items) = serde_json::from_str::<Vec<AiResultItem>>(trimmed) {
-        return Ok(items);
+        return Ok((items, ParsePath::BareArray));
     }
 
     let start = trimmed.find(['{', '[']);
@@ -222,15 +361,17 @@ fn extract_results(text: &str) -> Result<Vec<AiResultItem>, String> {
         if e > s {
             let sub = &trimmed[s..=e];
             if let Ok(w) = serde_json::from_str::<Wrapped>(sub) {
-                return Ok(w.results);
+                return Ok((w.results, ParsePath::SubstringWrapped));
             }
             if let Ok(items) = serde_json::from_str::<Vec<AiResultItem>>(sub) {
-                return Ok(items);
+                return Ok((items, ParsePath::SubstringArray));
             }
         }
     }
 
-    Err(format!("Could not parse model response as JSON: {trimmed}"))
+    let preview = trunc_log(trimmed, 500);
+    log::warn!("ai::extract_results: JSON parse failed — response preview: {preview}");
+    Err(format!("Could not parse model response as JSON: {preview}"))
 }
 
 /// Drop hallucinated ids and sanitize each `newName` (no path separators, no leaked
@@ -239,19 +380,80 @@ fn extract_results(text: &str) -> Result<Vec<AiResultItem>, String> {
 fn reconcile(
     items: Vec<AiResultItem>,
     ids: &HashSet<String>,
+    stems: &HashMap<String, String>,
     exts: &HashMap<String, String>,
-) -> Vec<AiResultItem> {
-    items
-        .into_iter()
-        .filter(|item| ids.contains(&item.id))
-        .map(|item| {
-            let ext = exts.get(&item.id).map(String::as_str).unwrap_or("");
-            AiResultItem {
-                new_name: sanitize_name(&item.new_name, ext),
-                id: item.id,
-            }
-        })
-        .collect()
+) -> ReconcileReport {
+    let model_count = items.len();
+    let mut dropped_unknown = 0usize;
+    let mut sanitized_count = 0usize;
+    let mut kept_ids = HashSet::new();
+    let mut out = Vec::new();
+
+    for item in items {
+        if !ids.contains(&item.id) {
+            dropped_unknown += 1;
+            log::debug!(
+                "ai::reconcile: dropped unknown id={} newName={:?}",
+                item.id,
+                item.new_name
+            );
+            continue;
+        }
+        let ext = exts.get(&item.id).map(String::as_str).unwrap_or("");
+        let raw = item.new_name.clone();
+        let new_name = sanitize_name(&raw, ext);
+        if new_name != raw.trim() {
+            sanitized_count += 1;
+            log::debug!(
+                "ai::reconcile: sanitized id={}: {:?} -> {:?}",
+                item.id,
+                raw,
+                new_name
+            );
+        }
+        kept_ids.insert(item.id.clone());
+        out.push(AiResultItem {
+            id: item.id,
+            new_name,
+        });
+    }
+
+    let missing_ids: Vec<String> = ids
+        .iter()
+        .filter(|id| !kept_ids.contains(*id))
+        .cloned()
+        .collect();
+
+    if dropped_unknown > 0 {
+        log::debug!(
+            "ai::reconcile: dropped {dropped_unknown} hallucinated id(s) (of {model_count} returned)"
+        );
+    }
+    if !missing_ids.is_empty() {
+        let missing_preview: Vec<_> = missing_ids
+            .iter()
+            .take(10)
+            .map(|id| format!("{id}({})", stems.get(id).map(String::as_str).unwrap_or("?")))
+            .collect();
+        let suffix = if missing_ids.len() > 10 {
+            format!(" … +{} more", missing_ids.len() - 10)
+        } else {
+            String::new()
+        };
+        log::debug!(
+            "ai::reconcile: {}/{} input file(s) missing from model response: {missing_preview:?}{suffix}",
+            missing_ids.len(),
+            ids.len()
+        );
+    }
+
+    ReconcileReport {
+        items: out,
+        model_count,
+        dropped_unknown,
+        sanitized_count,
+        missing_ids,
+    }
 }
 
 fn sanitize_name(name: &str, ext: &str) -> String {
@@ -324,7 +526,8 @@ mod tests {
 
     #[test]
     fn extract_results_clean_object() {
-        let got = extract_results(r#"{"results":[{"id":"a","newName":"A"}]}"#).unwrap();
+        let (got, path) = extract_results(r#"{"results":[{"id":"a","newName":"A"}]}"#).unwrap();
+        assert_eq!(path, ParsePath::WrappedObject);
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].id, "a");
         assert_eq!(got[0].new_name, "A");
@@ -332,20 +535,21 @@ mod tests {
 
     #[test]
     fn extract_results_bare_array() {
-        let got = extract_results(r#"[{"id":"a","newName":"A"}]"#).unwrap();
+        let (got, path) = extract_results(r#"[{"id":"a","newName":"A"}]"#).unwrap();
+        assert_eq!(path, ParsePath::BareArray);
         assert_eq!(got.len(), 1);
     }
 
     #[test]
     fn extract_results_fenced() {
-        let got = extract_results("```json\n{\"results\":[{\"id\":\"a\",\"newName\":\"A\"}]}\n```")
+        let (got, _) = extract_results("```json\n{\"results\":[{\"id\":\"a\",\"newName\":\"A\"}]}\n```")
             .unwrap();
         assert_eq!(got.len(), 1);
     }
 
     #[test]
     fn extract_results_prose_wrapped() {
-        let got = extract_results(
+        let (got, _) = extract_results(
             "Sure, here you go:\n{\"results\":[{\"id\":\"a\",\"newName\":\"A\"}]}\nHope that helps!",
         )
         .unwrap();
@@ -374,6 +578,7 @@ mod tests {
     #[test]
     fn reconcile_drops_unknown_ids_and_strips_extension() {
         let ids: HashSet<String> = ["a".to_string()].into_iter().collect();
+        let stems: HashMap<String, String> = [("a".to_string(), "old".to_string())].into();
         let exts: HashMap<String, String> = [("a".to_string(), "txt".to_string())].into();
         let items = vec![
             AiResultItem {
@@ -385,9 +590,11 @@ mod tests {
                 new_name: "Ghost".to_string(),
             },
         ];
-        let got = reconcile(items, &ids, &exts);
-        assert_eq!(got.len(), 1);
-        assert_eq!(got[0].new_name, "New Name");
+        let report = reconcile(items, &ids, &stems, &exts);
+        assert_eq!(report.items.len(), 1);
+        assert_eq!(report.items[0].new_name, "New Name");
+        assert_eq!(report.dropped_unknown, 1);
+        assert_eq!(report.sanitized_count, 1);
     }
 
     #[test]

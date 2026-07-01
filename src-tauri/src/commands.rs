@@ -130,6 +130,15 @@ pub async fn ai_generate(
         active_profile(&conn)?
     };
     let key = settings::get_api_key(&profile.id).unwrap_or_default();
+    let has_key = !key.is_empty();
+    log::info!(
+        "ai_generate: generation_id={generation_id}, {} entries, profile_id={}, label={}, has_key={has_key}, prompt_len={}",
+        entries.len(),
+        profile.id,
+        profile.label,
+        prompt.len()
+    );
+    log::trace!("ai_generate: prompt={prompt}");
     let emitter: Arc<dyn ai::AiProgressEmitter> = Arc::new(TauriProgressEmitter(app));
     ai::generate(&profile, &key, prompt, entries, &generation_id, emitter).await
 }
@@ -201,6 +210,7 @@ pub fn set_debug_logging(db: State<SettingsDb>, enabled: bool) -> Result<(), Str
 
 #[tauri::command]
 pub async fn test_connection(db: State<'_, SettingsDb>, profile_id: String) -> Result<String, String> {
+    log::info!("test_connection: profile_id={profile_id}");
     let profile = {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
         settings::load_state(&conn)
@@ -210,6 +220,12 @@ pub async fn test_connection(db: State<'_, SettingsDb>, profile_id: String) -> R
             .ok_or_else(|| format!("No such profile: {profile_id}"))?
     };
     let key = settings::get_api_key(&profile.id).unwrap_or_default();
+    log::debug!(
+        "test_connection: base_url={}, model={}, has_key={}",
+        profile.base_url,
+        profile.model,
+        !key.is_empty()
+    );
     let entries = vec![FileEntry {
         id: "test".to_string(),
         path: "/test/file.txt".to_string(),
@@ -229,5 +245,15 @@ pub async fn test_connection(db: State<'_, SettingsDb>, profile_id: String) -> R
         Arc::new(ai::NoopProgressEmitter),
     )
     .await
-    .map(|_| "ok".to_string())
+    .map(|report| {
+        log::info!(
+            "test_connection: profile_id={profile_id} ok — {} result(s)",
+            report.results.len()
+        );
+        "ok".to_string()
+    })
+    .map_err(|e| {
+        log::warn!("test_connection: profile_id={profile_id} failed: {e}");
+        e
+    })
 }

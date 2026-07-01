@@ -90,13 +90,27 @@ per-record: `warn`/`error` always pass, everything else passes only when the Ato
 
 ### Backend instrumentation (what / where / level)
 Follow existing thin-wrapper style; add log calls, don't restructure.
-- **`ai.rs::generate`**: `info!` (entry count, chunk count, base_url, model), `debug!` per
-  chunk, `warn!` on chunk failure, `trace!` for prompt/response bodies (trace-gated).
-- **`commands.rs`** apply/undo/redo/scan: `info!` on entry with counts, `warn!` per failure,
+- **`ai.rs::generate`**: `info` at start (generation id, entry/chunk counts, profile id,
+  `has_key`, base_url, model, chunk_size, concurrency, timeout, max_len) and on completion
+  (result count, failed chunk tally); `warn` on total/partial failure; `trace` for instruction
+  and system prompts; per-chunk `debug` (dispatch, timing, parse path, reconcile stats,
+  old→new renames); `trace` for per-chunk user prompt and raw model response; `warn` on
+  timeout, API errors (status code, no secrets), and JSON parse failure (truncated preview).
+- **`commands.rs::ai_generate` / `test_connection`**: `info` on entry with generation id,
+  counts, profile id/label, `has_key`, prompt length; `trace` for full prompt; `warn` on
+  test_connection failure.
+- **`commands.rs`** apply/undo/redo/scan: `info` on entry with counts, `warn!` per failure,
   `debug!` for old→new pairs.
 - **`settings.rs`** keychain: `warn!` when keychain unavailable, `debug!("key set/cleared for {profile_id}")`.
 - **REDACTION (critical):** never log the API key, `Authorization` header, or key value.
   Log `has_key`/`profile_id` only. This applies in `ai.rs`, `commands.rs`, `settings.rs`.
+
+### Frontend AI instrumentation (`store.ts`)
+- **`generateAi`**: `info` on start (step id, generation id, entry count, profile, model) and
+  on success (result count, failed chunk tally); `warn` on partial failure; `debug` per-chunk
+  progress events and per-file old→new renames (first 50); `trace` for full user prompt;
+  `debug` when skipping or discarding cancelled/stale generations.
+- **`cancelAi`**: `info` with step id and generation id when known.
 
 ### `Cargo.toml`
 - Add `tauri-plugin-log = "2"` and `log = "0.4"` (needed for the `log::*!` macros / `Metadata`).
