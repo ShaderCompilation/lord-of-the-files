@@ -15,6 +15,32 @@ import {
 import { Badge, Button, Overlay } from "./common";
 import { DiffText } from "./DiffText";
 
+/** One before/after row, shared by the applied-file list and the pending undo/redo checklist. */
+function HistoryFileRow(props: {
+  oldPath: string;
+  newPath: string;
+  badgeVariant: "changed" | "conflict" | "invalid" | "unchanged" | "warn";
+  badgeLabel: string;
+  badgeTitle: string;
+}) {
+  return (
+    <li class="history-file-row">
+      <div class="history-file-names">
+        <span class="history-file-name history-file-original" title={props.oldPath}>
+          {basename(props.oldPath)}
+        </span>
+        <span class="history-file-arrow">→</span>
+        <span class="history-file-name history-file-new" title={props.newPath}>
+          <DiffText original={basename(props.oldPath)} next={basename(props.newPath)} />
+        </span>
+      </div>
+      <Badge variant={props.badgeVariant} title={props.badgeTitle}>
+        {props.badgeLabel}
+      </Badge>
+    </li>
+  );
+}
+
 export function HistoryDetailModal() {
   const op = createMemo(() => s.history().find((o) => o.id === s.historyDetailOpId()));
 
@@ -68,12 +94,13 @@ export function HistoryDetailModal() {
                       >
                         <For each={files()}>
                           {(f) => (
-                            <li class="history-file-row">
-                              <DiffText original={f.oldPath} next={f.newPath} />
-                              <Badge variant={rowBadgeVariant(f.status)} title={rowTooltip(f.status)}>
-                                {f.status}
-                              </Badge>
-                            </li>
+                            <HistoryFileRow
+                              oldPath={f.oldPath}
+                              newPath={f.newPath}
+                              badgeVariant={rowBadgeVariant(f.status)}
+                              badgeLabel={f.status}
+                              badgeTitle={rowTooltip(f.status)}
+                            />
                           )}
                         </For>
                       </Show>
@@ -104,12 +131,13 @@ export function HistoryDetailModal() {
                     <ul class="history-file-list history-modal-list">
                       <For each={p().checks}>
                         {(c) => (
-                          <li class="history-file-row">
-                            <DiffText original={c.oldPath} next={c.newPath} />
-                            <Badge variant={checkBadgeVariant(c.status)} title={checkTooltip(c.status)}>
-                              {checkLabel(c.status)}
-                            </Badge>
-                          </li>
+                          <HistoryFileRow
+                            oldPath={c.oldPath}
+                            newPath={c.newPath}
+                            badgeVariant={checkBadgeVariant(c.status)}
+                            badgeLabel={checkLabel(c.status)}
+                            badgeTitle={checkTooltip(c.status)}
+                          />
                         )}
                       </For>
                     </ul>

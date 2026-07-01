@@ -822,7 +822,7 @@ textarea:focus {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 640px;
+  width: 1200px;
   max-width: calc(100vw - 48px);
   max-height: calc(100vh - 96px);
   background: var(--bg-elevated);
@@ -857,10 +857,35 @@ textarea:focus {
 }
 .history-file-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   font-size: 12px;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+.history-file-row:hover {
+  background: var(--bg-input);
+}
+.history-file-names {
+  display: grid;
+  grid-template-columns: 1fr 16px 1fr;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.history-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-file-original {
+  color: var(--muted);
+}
+.history-file-arrow {
+  text-align: center;
+  color: var(--muted);
+  font-weight: 600;
 }
 .history-confirm-actions {
   display: flex;
