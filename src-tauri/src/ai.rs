@@ -646,14 +646,33 @@ fn reconcile(
 }
 
 fn sanitize_name(name: &str, ext: &str) -> String {
-    let stripped: String = name.chars().filter(|c| *c != '/' && *c != '\\').collect();
-    let trimmed = stripped.trim();
-    if !ext.is_empty() {
-        if let Some(stem) = trimmed.strip_suffix(&format!(".{ext}")) {
-            return stem.to_string();
+    // Drop path separators (unchanged) and other OS-invalid chars; map ':' to " -"
+    // (near-universal title/subtitle separator in LLM output); drop control chars.
+    let mut filtered = String::with_capacity(name.len());
+    for c in name.chars() {
+        match c {
+            '/' | '\\' | '<' | '>' | '"' | '|' | '?' | '*' => {}
+            ':' => filtered.push_str(" -"),
+            c if (c as u32) < 0x20 => {}
+            c => filtered.push(c),
         }
     }
-    trimmed.to_string()
+
+    // Collapse whitespace runs the substitutions above may have introduced, and trim.
+    let collapsed = crate::engine::steps::clean_up(&filtered, true, true, None, false);
+
+    // Strip a trailing dot (validate_name also rejects names ending in '.').
+    let trimmed_dot = collapsed.trim_end_matches('.');
+
+    // Strip a leaked "<stem>.<ext>" suffix on the now-trimmed string.
+    let stem = if ext.is_empty() {
+        trimmed_dot
+    } else {
+        trimmed_dot.strip_suffix(&format!(".{ext}")).unwrap_or(trimmed_dot)
+    };
+
+    // Extension-stripping can re-expose a trailing '.' or space — trim once more.
+    stem.trim().trim_end_matches('.').trim().to_string()
 }
 
 fn system_prompt(max_len: u32) -> String {
@@ -662,10 +681,15 @@ fn system_prompt(max_len: u32) -> String {
          extension, `ext`, `parentHint`) and an instruction, return ONLY \
          {{\"results\":[{{\"id\":\"...\",\"newName\":\"...\"}}]}}. Keep each `id` exactly; one \
          result per file; `newName` is the stem only — never an extension, path, or separator; \
-         keep under {max_len} chars; don't invent ids. Use your general knowledge to follow the \
-         instruction — e.g. adding a known author, date, or topic — even if that information \
-         isn't present in the filename itself. Only echo the original name when you cannot \
-         confidently improve it at all."
+         use only characters valid in filenames — no `: < > \" / \\ | ? *` or control \
+         characters — and write subtitles as \" - \" instead of a colon, e.g. \"Title - \
+         Subtitle\" not \"Title: Subtitle\"; keep under {max_len} chars; don't invent ids. Use \
+         your general knowledge to follow the instruction — e.g. adding a known author, date, \
+         or topic — even if that information isn't present in the filename itself, but don't \
+         invent an author, date, or detail you're not reasonably confident about. `parentHint` \
+         is the enclosing folder name — useful context (e.g. series, author, or subject) but \
+         never to be copied verbatim into `newName` unless it genuinely belongs there. Only \
+         echo the original name when you cannot confidently improve it at all."
     )
 }
 
@@ -792,6 +816,45 @@ mod tests {
     #[test]
     fn sanitize_strips_path_separators() {
         assert_eq!(sanitize_name("a/b\\c.txt", "txt"), "abc");
+    }
+
+    #[test]
+    fn sanitize_replaces_colon_with_dash() {
+        assert_eq!(
+            sanitize_name("Windows Security Internals: A Deep Dive - James Forshaw", ""),
+            "Windows Security Internals - A Deep Dive - James Forshaw"
+        );
+    }
+
+    #[test]
+    fn sanitize_strips_other_invalid_chars() {
+        assert_eq!(sanitize_name("Report <v2> \"final\"?*|", ""), "Report v2 final");
+    }
+
+    #[test]
+    fn sanitize_strips_control_chars() {
+        assert_eq!(sanitize_name("Bad\u{0007}Name\u{0001}Here", ""), "BadNameHere");
+    }
+
+    #[test]
+    fn sanitize_strips_trailing_dot() {
+        assert_eq!(sanitize_name("Trailing Dot.", ""), "Trailing Dot");
+    }
+
+    #[test]
+    fn sanitize_still_strips_leaked_extension() {
+        assert_eq!(sanitize_name("New Name.txt", "txt"), "New Name");
+    }
+
+    #[test]
+    fn sanitize_handles_leaked_extension_exposing_trailing_dot() {
+        // "Foo..txt" with ext "txt": strip ".txt" suffix -> "Foo." -> must re-trim trailing dot.
+        assert_eq!(sanitize_name("Foo..txt", "txt"), "Foo");
+    }
+
+    #[test]
+    fn sanitize_trims_extra_whitespace_around_colon() {
+        assert_eq!(sanitize_name("Title  :   Subtitle", ""), "Title - Subtitle");
     }
 
     // ---- HTTP-level tests against a mocked /chat/completions endpoint ----------------
