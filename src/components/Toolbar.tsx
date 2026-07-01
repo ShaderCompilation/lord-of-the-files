@@ -3,7 +3,7 @@ import { createMemo } from "solid-js";
 
 import * as s from "../store";
 
-export function Toolbar(props: { onToggleHistory: () => void }) {
+export function Toolbar(props: { onToggleHistory: () => void; onToggleSettings: () => void }) {
   const addFiles = async () => {
     const sel = await open({ multiple: true });
     if (sel) await s.addPaths(Array.isArray(sel) ? sel : [sel]);
@@ -71,6 +71,9 @@ export function Toolbar(props: { onToggleHistory: () => void }) {
           {stats().changed} to rename
           {stats().blocking > 0 ? ` · ${stats().blocking} blocked` : ""}
         </span>
+        <button type="button" class="ghost" onClick={props.onToggleSettings}>
+          Settings
+        </button>
         <button type="button" class="ghost" onClick={props.onToggleHistory}>
           History
         </button>

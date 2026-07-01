@@ -345,7 +345,12 @@ export function StepCard(props: { step: StepConfig; index: number; total: number
                   <div class="ai-row">
                     <button type="button"
                       onClick={() => s.generateAi(id(), st.prompt)}
-                      disabled={s.isAiLoading(id()) || s.files().length === 0 || !st.prompt.trim()}
+                      disabled={
+                        s.isAiLoading(id()) ||
+                        s.files().length === 0 ||
+                        !st.prompt.trim() ||
+                        !s.activeProfile()
+                      }
                     >
                       {s.isAiLoading(id()) ? "Generating…" : "Generate"}
                     </button>
@@ -353,6 +358,9 @@ export function StepCard(props: { step: StepConfig; index: number; total: number
                       {st.results ? `${st.results.length} suggestion(s) cached` : "not run yet"}
                     </span>
                   </div>
+                  <Show when={!s.activeProfile()}>
+                    <p class="muted small">Set up a provider in Settings to use AI Rename.</p>
+                  </Show>
                 </>
               );
             })()}

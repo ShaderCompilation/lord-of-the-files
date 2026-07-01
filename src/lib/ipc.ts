@@ -4,13 +4,15 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type {
-  AiResultItem,
+  AiGenerateReport,
   ApplyReport,
   FileEntry,
   Operation,
   Pipeline,
   PreviewResult,
+  ProviderProfile,
   RenameItem,
+  SettingsState,
   UndoReport,
 } from "./types";
 
@@ -45,10 +47,34 @@ export function redoOperation(opId: string): Promise<UndoReport> {
   return invoke("redo_operation", { opId });
 }
 
-export function aiGenerate(
-  prompt: string,
-  entries: FileEntry[],
-  maxLen: number,
-): Promise<AiResultItem[]> {
-  return invoke("ai_generate", { prompt, entries, maxLen });
+export function aiGenerate(prompt: string, entries: FileEntry[]): Promise<AiGenerateReport> {
+  return invoke("ai_generate", { prompt, entries });
+}
+
+export function getSettings(): Promise<SettingsState> {
+  return invoke("get_settings");
+}
+
+export function upsertProfile(profile: ProviderProfile): Promise<void> {
+  return invoke("upsert_profile", { profile });
+}
+
+export function deleteProfile(id: string): Promise<void> {
+  return invoke("delete_profile", { id });
+}
+
+export function setActiveProfile(id: string): Promise<void> {
+  return invoke("set_active_profile", { id });
+}
+
+export function setApiKey(profileId: string, key: string): Promise<void> {
+  return invoke("set_api_key", { profileId, key });
+}
+
+export function clearApiKey(profileId: string): Promise<void> {
+  return invoke("clear_api_key", { profileId });
+}
+
+export function testConnection(profileId: string): Promise<string> {
+  return invoke("test_connection", { profileId });
 }
