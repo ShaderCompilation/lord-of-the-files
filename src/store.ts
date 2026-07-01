@@ -5,6 +5,7 @@ import { createSignal } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 
 import * as ipc from "./lib/ipc";
+import { log } from "./lib/log";
 import { defaultStep } from "./lib/steps";
 import type {
   AiResultItem,
@@ -35,6 +36,7 @@ export function toggleExclude(id: string): void {
 }
 
 export async function addPaths(paths: string[]): Promise<void> {
+  log.debug(`addPaths: ${paths.length} path(s)`);
   const scanned = await ipc.scanPaths(paths, recursive(), includeDirs());
   setFiles((prev) => {
     const byId = new Map(prev.map((f) => [f.id, f]));
@@ -132,11 +134,13 @@ export async function runPreview(): Promise<void> {
     setPreview({ rows: [], stepErrors: [] });
     return;
   }
+  log.debug(`runPreview: ${entries.length} entries, ${pipeline.steps.length} step(s)`);
   setPreviewLoading(true);
   try {
     const result = await ipc.computePreview(entries, { steps: pipeline.steps });
     setPreview(result);
   } catch (e) {
+    log.error(`runPreview failed: ${String(e)}`);
     setNotice(`Preview failed: ${String(e)}`);
   } finally {
     setPreviewLoading(false);
@@ -153,6 +157,7 @@ export async function refreshHistory(): Promise<void> {
   try {
     setHistory(await ipc.listOperations());
   } catch (e) {
+    log.error(`refreshHistory failed: ${String(e)}`);
     setNotice(`Could not load history: ${String(e)}`);
   }
 }
@@ -178,6 +183,7 @@ export async function applyAll(): Promise<void> {
   const rows = applicableRows();
   if (rows.length === 0) return;
   const items = rows.map((r) => ({ oldPath: r.id, newName: r.newName }));
+  log.info(`applyAll: ${items.length} item(s)`);
   const failedPaths = new Set<string>();
   try {
     const report = await ipc.applyRename(items);
@@ -198,26 +204,31 @@ export async function applyAll(): Promise<void> {
     const failMsg = report.failures.length ? `, ${report.failures.length} failed` : "";
     setNotice(`Renamed ${report.renamed} file(s)${failMsg}.`);
   } catch (e) {
+    log.error(`applyAll failed: ${String(e)}`);
     setNotice(`Apply failed: ${String(e)}`);
   }
 }
 
 export async function undo(opId: string): Promise<void> {
+  log.debug(`undo: ${opId}`);
   try {
     const r = await ipc.undoOperation(opId);
     await refreshHistory();
     setNotice(`Undid ${r.reverted} rename(s). Re-add files to continue editing.`);
   } catch (e) {
+    log.error(`undo failed: ${String(e)}`);
     setNotice(`Undo failed: ${String(e)}`);
   }
 }
 
 export async function redo(opId: string): Promise<void> {
+  log.debug(`redo: ${opId}`);
   try {
     const r = await ipc.redoOperation(opId);
     await refreshHistory();
     setNotice(`Redid ${r.reverted} rename(s).`);
   } catch (e) {
+    log.error(`redo failed: ${String(e)}`);
     setNotice(`Redo failed: ${String(e)}`);
   }
 }
@@ -243,12 +254,14 @@ export async function generateAi(stepId: string, prompt: string): Promise<void> 
     setNotice("No active provider — open Settings to add one.");
     return;
   }
+  log.info(`generateAi: step=${stepId}, ${entries.length} entries`);
   setAiBusy(stepId, true);
   try {
     const report = await ipc.aiGenerate(prompt, entries);
     setStepResults(stepId, report.results);
     setNotice(report.warning ?? `AI suggested ${report.results.length} name(s).`);
   } catch (e) {
+    log.error(`generateAi failed: ${String(e)}`);
     setNotice(`AI request failed: ${String(e)}`);
   } finally {
     setAiBusy(stepId, false);
@@ -260,6 +273,7 @@ export async function generateAi(stepId: string, prompt: string): Promise<void> 
 const [settings, setSettings] = createSignal<SettingsState>({
   profiles: [],
   activeProfileId: null,
+  debugLogging: false,
 });
 export { settings };
 
@@ -272,6 +286,7 @@ export async function loadSettings(): Promise<void> {
   try {
     setSettings(await ipc.getSettings());
   } catch (e) {
+    log.error(`loadSettings failed: ${String(e)}`);
     setNotice(`Could not load settings: ${String(e)}`);
   }
 }
@@ -281,6 +296,7 @@ export async function upsertProfile(profile: ProviderProfile): Promise<void> {
     await ipc.upsertProfile(profile);
     await loadSettings();
   } catch (e) {
+    log.error(`upsertProfile failed: ${String(e)}`);
     setNotice(`Could not save profile: ${String(e)}`);
   }
 }
@@ -290,6 +306,7 @@ export async function deleteProfile(id: string): Promise<void> {
     await ipc.deleteProfile(id);
     await loadSettings();
   } catch (e) {
+    log.error(`deleteProfile failed: ${String(e)}`);
     setNotice(`Could not delete profile: ${String(e)}`);
   }
 }
@@ -299,15 +316,19 @@ export async function setActiveProfile(id: string): Promise<void> {
     await ipc.setActiveProfile(id);
     await loadSettings();
   } catch (e) {
+    log.error(`setActiveProfile failed: ${String(e)}`);
     setNotice(`Could not set active profile: ${String(e)}`);
   }
 }
 
 export async function saveApiKey(profileId: string, key: string): Promise<void> {
+  // REDACTION: never log `key` — only the profile id.
+  log.debug(`saveApiKey: profileId=${profileId}`);
   try {
     await ipc.setApiKey(profileId, key);
     await loadSettings();
   } catch (e) {
+    log.error(`saveApiKey failed: ${String(e)}`);
     setNotice(`Could not save API key: ${String(e)}`);
   }
 }
@@ -317,10 +338,21 @@ export async function clearApiKey(profileId: string): Promise<void> {
     await ipc.clearApiKey(profileId);
     await loadSettings();
   } catch (e) {
+    log.error(`clearApiKey failed: ${String(e)}`);
     setNotice(`Could not clear API key: ${String(e)}`);
   }
 }
 
 export function testConnection(profileId: string): Promise<string> {
   return ipc.testConnection(profileId);
+}
+
+export async function setDebugLogging(enabled: boolean): Promise<void> {
+  try {
+    await ipc.setDebugLogging(enabled);
+    await loadSettings();
+  } catch (e) {
+    log.error(`setDebugLogging failed: ${String(e)}`);
+    setNotice(`Could not update debug logging: ${String(e)}`);
+  }
 }

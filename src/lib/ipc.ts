@@ -78,3 +78,7 @@ export function clearApiKey(profileId: string): Promise<void> {
 export function testConnection(profileId: string): Promise<string> {
   return invoke("test_connection", { profileId });
 }
+
+export function setDebugLogging(enabled: boolean): Promise<void> {
+  return invoke("set_debug_logging", { enabled });
+}

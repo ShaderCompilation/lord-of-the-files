@@ -3,6 +3,7 @@ mod commands;
 mod engine;
 mod fs_scan;
 mod history;
+mod logging;
 mod settings;
 mod types;
 
@@ -20,6 +21,7 @@ use settings::SettingsDb;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(logging::plugin())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -32,6 +34,9 @@ pub fn run() {
 
             let settings_conn = Connection::open(dir.join("settings.db"))?;
             settings::init_schema(&settings_conn)?;
+            let st = settings::load_state(&settings_conn);
+            logging::set_debug(st.debug_logging);
+            log::info!("started; debug_logging={}", st.debug_logging);
             app.manage(SettingsDb(Mutex::new(settings_conn)));
             Ok(())
         })
@@ -50,6 +55,7 @@ pub fn run() {
             commands::set_api_key,
             commands::clear_api_key,
             commands::test_connection,
+            commands::set_debug_logging,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

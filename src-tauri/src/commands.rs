@@ -12,7 +12,13 @@ use crate::types::{AiGenerateReport, FileEntry, Pipeline, PreviewResult};
 
 #[tauri::command]
 pub fn scan_paths(paths: Vec<String>, recursive: bool, include_dirs: bool) -> Vec<FileEntry> {
-    fs_scan::scan_paths(&paths, recursive, include_dirs)
+    log::info!(
+        "scan_paths: {} path(s), recursive={recursive}, include_dirs={include_dirs}",
+        paths.len()
+    );
+    let entries = fs_scan::scan_paths(&paths, recursive, include_dirs);
+    log::debug!("scan_paths: found {} entries", entries.len());
+    entries
 }
 
 #[tauri::command]
@@ -22,8 +28,16 @@ pub fn compute_preview(entries: Vec<FileEntry>, pipeline: Pipeline) -> PreviewRe
 
 #[tauri::command]
 pub fn apply_rename(db: State<HistoryDb>, items: Vec<RenameItem>) -> Result<ApplyReport, String> {
+    log::info!("apply_rename: {} item(s)", items.len());
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    Ok(history::apply_rename(&conn, &items))
+    let report = history::apply_rename(&conn, &items);
+    for item in &items {
+        log::debug!("apply_rename: {} -> {}", item.old_path, item.new_name);
+    }
+    for f in &report.failures {
+        log::warn!("apply_rename failed for {}: {}", f.path, f.error);
+    }
+    Ok(report)
 }
 
 #[tauri::command]
@@ -34,14 +48,24 @@ pub fn list_operations(db: State<HistoryDb>) -> Result<Vec<Operation>, String> {
 
 #[tauri::command]
 pub fn undo_operation(db: State<HistoryDb>, op_id: String) -> Result<UndoReport, String> {
+    log::info!("undo_operation: {op_id}");
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    history::undo_operation(&conn, &op_id).map_err(|e| e.to_string())
+    let report = history::undo_operation(&conn, &op_id).map_err(|e| e.to_string())?;
+    for f in &report.failures {
+        log::warn!("undo_operation failed for {}: {}", f.path, f.error);
+    }
+    Ok(report)
 }
 
 #[tauri::command]
 pub fn redo_operation(db: State<HistoryDb>, op_id: String) -> Result<UndoReport, String> {
+    log::info!("redo_operation: {op_id}");
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    history::redo_operation(&conn, &op_id).map_err(|e| e.to_string())
+    let report = history::redo_operation(&conn, &op_id).map_err(|e| e.to_string())?;
+    for f in &report.failures {
+        log::warn!("redo_operation failed for {}: {}", f.path, f.error);
+    }
+    Ok(report)
 }
 
 /// Looks up the active profile, erroring with a message pointing at Settings when none is
@@ -125,6 +149,17 @@ pub fn set_api_key(profile_id: String, key: String) -> Result<(), String> {
 #[tauri::command]
 pub fn clear_api_key(profile_id: String) -> Result<(), String> {
     settings::clear_api_key(&profile_id)
+}
+
+#[tauri::command]
+pub fn set_debug_logging(db: State<SettingsDb>, enabled: bool) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut state = settings::load_state(&conn);
+    state.debug_logging = enabled;
+    settings::save_state(&conn, &state)?;
+    crate::logging::set_debug(enabled);
+    log::info!("debug logging {}", if enabled { "enabled" } else { "disabled" });
+    Ok(())
 }
 
 #[tauri::command]

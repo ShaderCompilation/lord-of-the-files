@@ -1,11 +1,14 @@
 import { For, Show } from "solid-js";
 
 import * as s from "../../store";
+import { GeneralSettings } from "./GeneralSettings";
 import { ProfileCard } from "./ProfileCard";
 
 export function ProfileList(props: { onAdd: () => void; onEdit: (id: string) => void }) {
   return (
     <>
+      <GeneralSettings />
+
       <p class="muted small settings-intro">
         Bring your own key — configure a provider to use AI Rename.
       </p>

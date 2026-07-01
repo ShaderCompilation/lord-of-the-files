@@ -48,6 +48,14 @@ pub async fn generate(
     let chunks = chunk_entries(entries, chunk_size);
     let total_chunks = chunks.len();
 
+    log::info!(
+        "ai::generate: {} chunk(s), base_url={}, model={}",
+        total_chunks,
+        cfg.base_url,
+        cfg.model
+    );
+    log::trace!("ai::generate: prompt={prompt}");
+
     let tasks = chunks.into_iter().enumerate().map(|(chunk_index, chunk)| {
         let provider = provider.clone();
         let system = system.clone();
@@ -56,9 +64,13 @@ pub async fn generate(
         let exts: HashMap<String, String> =
             chunk.iter().map(|e| (e.id.clone(), e.ext.clone())).collect();
         async move {
+            log::debug!("ai::generate: chunk {chunk_index} dispatching");
             let outcome = run_chunk(provider, system, user, timeout)
                 .await
                 .map(|items| reconcile(items, &ids, &exts));
+            if let Err(e) = &outcome {
+                log::warn!("ai::generate: chunk {chunk_index} failed: {e}");
+            }
             (chunk_index, outcome)
         }
     });
@@ -136,6 +148,7 @@ async fn run_chunk(
             let text = resp
                 .text()
                 .ok_or_else(|| "Model returned no text content".to_string())?;
+            log::trace!("ai::generate: response={text}");
             extract_results(&text)
         }
     }

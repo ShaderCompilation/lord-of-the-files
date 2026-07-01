@@ -484,6 +484,17 @@ textarea:focus {
 .settings-add {
   width: 100%;
 }
+.settings-general {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.settings-general h3 {
+  margin: 0;
+  font-size: 13px;
+}
 
 /* Profiles list (home view) */
 .provider-list {

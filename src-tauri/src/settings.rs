@@ -53,6 +53,8 @@ pub struct ProviderProfile {
 pub struct SettingsState {
     pub profiles: Vec<ProviderProfile>,
     pub active_profile_id: Option<String>,
+    #[serde(default)]
+    pub debug_logging: bool,
 }
 
 pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
@@ -84,6 +86,7 @@ pub fn save_state(conn: &Connection, state: &SettingsState) -> Result<(), String
 }
 
 fn keychain_unavailable(e: keyring::Error) -> String {
+    log::warn!("keychain unavailable: {e}");
     format!(
         "No OS keychain available ({e}) — install gnome-keyring/KWallet, or set LOTF_API_KEY"
     )
@@ -103,13 +106,18 @@ pub fn get_api_key(profile_id: &str) -> Option<String> {
 
 pub fn set_api_key(profile_id: &str, key: &str) -> Result<(), String> {
     let entry = keyring::Entry::new(KEYRING_SERVICE, profile_id).map_err(keychain_unavailable)?;
-    entry.set_password(key).map_err(keychain_unavailable)
+    entry.set_password(key).map_err(keychain_unavailable)?;
+    log::debug!("key set for {profile_id}");
+    Ok(())
 }
 
 pub fn clear_api_key(profile_id: &str) -> Result<(), String> {
     let entry = keyring::Entry::new(KEYRING_SERVICE, profile_id).map_err(keychain_unavailable)?;
     match entry.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Ok(()) | Err(keyring::Error::NoEntry) => {
+            log::debug!("key cleared for {profile_id}");
+            Ok(())
+        }
         Err(e) => Err(keychain_unavailable(e)),
     }
 }
@@ -152,12 +160,26 @@ mod tests {
                 has_key: false,
             }],
             active_profile_id: Some("p1".into()),
+            debug_logging: true,
         };
         save_state(&conn, &state).unwrap();
         let loaded = load_state(&conn);
         assert_eq!(loaded.active_profile_id.as_deref(), Some("p1"));
         assert_eq!(loaded.profiles.len(), 1);
         assert_eq!(loaded.profiles[0].label, "OpenRouter");
+        assert!(loaded.debug_logging);
+    }
+
+    #[test]
+    fn debug_logging_defaults_to_false_when_blob_missing_key() {
+        let conn = mem_db();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('state', '{\"profiles\":[],\"activeProfileId\":null}')",
+            [],
+        )
+        .unwrap();
+        let loaded = load_state(&conn);
+        assert!(!loaded.debug_logging);
     }
 
     #[test]

@@ -147,6 +147,7 @@ export interface ProviderProfile {
 export interface SettingsState {
   profiles: ProviderProfile[];
   activeProfileId: string | null;
+  debugLogging: boolean;
 }
 
 export interface AiGenerateReport {
