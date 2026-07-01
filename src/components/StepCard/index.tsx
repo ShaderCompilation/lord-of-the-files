@@ -1,6 +1,7 @@
-import { Match, Show, Switch } from "solid-js";
+import { Match, Show, Switch, createMemo, createSignal } from "solid-js";
 
 import * as s from "../../store";
+import { stepSummary } from "../../lib/steps";
 import type { Scope, StepConfig } from "../../lib/types";
 import { SelectField } from "../common";
 import { AiFields } from "./AiFields";
@@ -14,15 +15,38 @@ import { RemoveFields } from "./RemoveFields";
 import { StepCardHead } from "./StepCardHead";
 import type { Variant } from "./types";
 
-export function StepCard(props: { step: StepConfig; index: number; total: number }) {
+export function StepCard(props: {
+  step: StepConfig;
+  index: number;
+  onDragStart?: () => void;
+  onDragEnd?: () => void;
+}) {
   const id = () => props.step.id;
   const set = (patch: Record<string, unknown>) => s.updateStep(id(), patch);
   const error = () => s.stepErrorFor(id());
+  const [collapsed, setCollapsed] = createSignal(false);
+  const summary = createMemo(() => stepSummary(props.step));
 
   return (
-    <div class="stepcard" classList={{ disabled: !props.step.enabled }}>
-      <StepCardHead step={props.step} index={props.index} total={props.total} />
+    <div
+      class="stepcard"
+      classList={{
+        disabled: !props.step.enabled,
+        ai: props.step.type === "ai",
+        collapsed: collapsed(),
+      }}
+    >
+      <StepCardHead
+        step={props.step}
+        index={props.index}
+        collapsed={collapsed()}
+        summary={summary()}
+        onToggleCollapse={() => setCollapsed((v) => !v)}
+        onDragStart={props.onDragStart}
+        onDragEnd={props.onDragEnd}
+      />
 
+      <Show when={!collapsed()}>
       <div class="stepcard-body">
         <Switch>
           <Match when={props.step.type === "findReplace"}>
@@ -75,6 +99,7 @@ export function StepCard(props: { step: StepConfig; index: number; total: number
           <div class="step-error">{error()}</div>
         </Show>
       </div>
+      </Show>
     </div>
   );
 }

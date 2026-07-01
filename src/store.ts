@@ -1,6 +1,7 @@
 // Central reactive state + actions for the renamer. Kept in one module so the reactive
 // graph (files -> pipeline -> preview) lives in one place and avoids circular imports.
 
+import { open } from "@tauri-apps/plugin-dialog";
 import { createSignal } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 
@@ -45,6 +46,18 @@ export async function addPaths(paths: string[]): Promise<void> {
   });
 }
 
+/** Open the native file picker and add the selection. */
+export async function pickFiles(): Promise<void> {
+  const sel = await open({ multiple: true });
+  if (sel) await addPaths(Array.isArray(sel) ? sel : [sel]);
+}
+
+/** Open the native folder picker and add the selection. */
+export async function pickFolder(): Promise<void> {
+  const sel = await open({ directory: true, multiple: true });
+  if (sel) await addPaths(Array.isArray(sel) ? sel : [sel]);
+}
+
 export function removeFile(id: string): void {
   setFiles((prev) => prev.filter((f) => f.id !== id));
 }
@@ -52,6 +65,7 @@ export function removeFile(id: string): void {
 export function clearFiles(): void {
   setFiles([]);
   setExcluded(new Set<string>());
+  setTableFilter("all");
 }
 
 // ---- Scan / assembly options -----------------------------------------------------------
@@ -122,6 +136,31 @@ export function setStepResults(id: string, results: AiResultItem[] | null): void
 const [preview, setPreview] = createSignal<PreviewResult>({ rows: [], stepErrors: [] });
 const [previewLoading, setPreviewLoading] = createSignal(false);
 export { preview, previewLoading };
+
+// Which preview rows the file table shows. Lifted into the store so the toolbar's
+// "conflicts" affordance can jump the table straight to the blocking rows.
+export type TableFilter = "all" | "changed" | "conflict" | "unchanged";
+const [tableFilter, setTableFilter] = createSignal<TableFilter>("all");
+export { tableFilter, setTableFilter };
+
+export interface PreviewCounts {
+  total: number;
+  changed: number;
+  conflict: number;
+  unchanged: number;
+}
+
+/** Row counts by status (conflict groups both `conflict` and `invalid`). */
+export function previewCounts(): PreviewCounts {
+  const counts: PreviewCounts = { total: 0, changed: 0, conflict: 0, unchanged: 0 };
+  for (const r of preview().rows) {
+    counts.total++;
+    if (r.status === "changed") counts.changed++;
+    else if (r.status === "conflict" || r.status === "invalid") counts.conflict++;
+    else counts.unchanged++;
+  }
+  return counts;
+}
 
 export function stepErrorFor(stepId: string): string | undefined {
   return preview().stepErrors.find((e) => e.stepId === stepId)?.message;
