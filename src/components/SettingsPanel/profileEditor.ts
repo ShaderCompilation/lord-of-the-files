@@ -14,7 +14,7 @@ function blankProfile(): ProviderProfile {
     model: "",
     chunkSize: 40,
     concurrency: 3,
-    maxLen: 80,
+    maxLen: 300,
     timeoutSecs: 60,
     hasKey: false,
   };

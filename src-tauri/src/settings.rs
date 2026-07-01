@@ -21,7 +21,7 @@ fn default_concurrency() -> u32 {
     3
 }
 fn default_max_len() -> u32 {
-    80
+    300
 }
 fn default_timeout_secs() -> u32 {
     60
@@ -203,7 +203,7 @@ mod tests {
                 model: "openai/gpt-4o-mini".into(),
                 chunk_size: 40,
                 concurrency: 3,
-                max_len: 80,
+                max_len: 300,
                 timeout_secs: 60,
                 has_key: false,
             }],

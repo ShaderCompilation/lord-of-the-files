@@ -818,7 +818,7 @@ mod tests {
             model: "test-model".to_string(),
             chunk_size: 40,
             concurrency: 3,
-            max_len: 80,
+            max_len: 300,
             timeout_secs: 60,
             has_key: false,
         }
