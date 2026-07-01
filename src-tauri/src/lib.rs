@@ -1,4 +1,5 @@
 mod ai;
+mod ai_registry;
 mod commands;
 mod engine;
 mod fs_scan;
@@ -15,6 +16,7 @@ use std::sync::Mutex;
 use rusqlite::Connection;
 use tauri::Manager;
 
+use ai_registry::AiGenerationRegistry;
 use history::HistoryDb;
 use settings::SettingsDb;
 
@@ -38,6 +40,7 @@ pub fn run() {
             logging::set_debug(st.debug_logging);
             log::info!("started; debug_logging={}", st.debug_logging);
             app.manage(SettingsDb(Mutex::new(settings_conn)));
+            app.manage(AiGenerationRegistry::new());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -51,6 +54,7 @@ pub fn run() {
             commands::preview_undo,
             commands::preview_redo,
             commands::ai_generate,
+            commands::cancel_ai_generate,
             commands::get_settings,
             commands::upsert_profile,
             commands::delete_profile,

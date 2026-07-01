@@ -36,6 +36,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 futures = "0.3"
 tokio = { version = "1", features = ["time", "macros", "rt-multi-thread"] }
+tokio-util = "0.7"
 # `openai` is enabled alongside `openaicompatible` to work around a v0.5.2 bug where
 # `openai_compatible::embedding_model` unconditionally references `providers::openai` without
 # gating on the `openai` feature; still far short of compiling in all 75 providers.

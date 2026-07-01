@@ -70,6 +70,10 @@ export function aiGenerate(
   return invoke("ai_generate", { prompt, entries, generationId });
 }
 
+export function cancelAiGenerate(generationId: string): Promise<void> {
+  return invoke("cancel_ai_generate", { generationId });
+}
+
 export function getSettings(): Promise<SettingsState> {
   return invoke("get_settings");
 }

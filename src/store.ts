@@ -448,6 +448,11 @@ export async function generateAi(stepId: string, prompt: string): Promise<void> 
     log.info(
       `generateAi: superseding in-flight generation=${prevGenerationId} for step=${stepId}`,
     );
+    void ipc.cancelAiGenerate(prevGenerationId).catch((e) => {
+      log.debug(
+        `generateAi: best-effort cancel of superseded generation=${prevGenerationId} failed: ${String(e)}`,
+      );
+    });
   }
   setAiGenerationId((prev) => new Map(prev).set(stepId, generationId));
   setAiStepError((prev) => {
@@ -577,6 +582,11 @@ export function cancelAi(stepId: string): void {
   log.info(
     `cancelAi: step=${stepId}${generationId ? `, generation=${generationId}` : ""}`,
   );
+  if (generationId) {
+    void ipc.cancelAiGenerate(generationId).catch((e) => {
+      log.debug(`cancelAi: best-effort cancel of generation=${generationId} failed: ${String(e)}`);
+    });
+  }
 }
 
 // ---- Settings / providers ---------------------------------------------------------------

@@ -4,8 +4,10 @@
 use std::sync::Arc;
 
 use tauri::{Emitter, State};
+use tokio_util::sync::CancellationToken;
 
 use crate::ai;
+use crate::ai_registry::AiGenerationRegistry;
 use crate::engine;
 use crate::fs_scan;
 use crate::history::{
@@ -122,6 +124,7 @@ fn active_profile(state: &SettingsState) -> Result<ProviderProfile, String> {
 pub async fn ai_generate(
     app: tauri::AppHandle,
     db: State<'_, SettingsDb>,
+    registry: State<'_, AiGenerationRegistry>,
     prompt: String,
     entries: Vec<FileEntry>,
     generation_id: String,
@@ -145,7 +148,25 @@ pub async fn ai_generate(
     );
     log::trace!("ai_generate: prompt={prompt}");
     let emitter: Arc<dyn ai::AiProgressEmitter> = Arc::new(TauriProgressEmitter(app));
-    ai::generate(&profile, &key, prompt, entries, &generation_id, emitter, mock).await
+    let token = registry.register(generation_id.clone());
+    let result = ai::generate(&profile, &key, prompt, entries, &generation_id, emitter, mock, token).await;
+    registry.remove(&generation_id);
+    result
+}
+
+/// Best-effort cancellation of an in-flight `ai_generate` call. Not an error if the
+/// generation already finished (or was never registered) — the frontend calls this
+/// fire-and-forget whenever it stops caring about a generation's result (user clicked
+/// Cancel, or a newer generation superseded it), and by the time this arrives the original
+/// call may well have already completed on its own.
+#[tauri::command]
+pub fn cancel_ai_generate(
+    registry: State<AiGenerationRegistry>,
+    generation_id: String,
+) -> Result<(), String> {
+    log::info!("cancel_ai_generate: generation_id={generation_id}");
+    registry.cancel(&generation_id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -268,6 +289,7 @@ pub async fn test_connection(db: State<'_, SettingsDb>, profile_id: String) -> R
         "test-connection",
         Arc::new(ai::NoopProgressEmitter),
         None, // always exercises the real provider, even if Mock AI is on
+        CancellationToken::new(),
     )
     .await
     .map(|report| {
