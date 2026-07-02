@@ -324,6 +324,12 @@ mod tests {
     }
 
     #[test]
+    fn insert_and_remove_are_unicode_char_safe() {
+        assert_eq!(insert("日本語", "-", InsertPosition::AtIndex, 1), "日-本語");
+        assert_eq!(remove("日本語ファイル", RemoveFrom::Start, 3, 0), "ファイル");
+    }
+
+    #[test]
     fn cleanup_collapse_trim_spaces() {
         assert_eq!(
             clean_up("  a   b  ", true, true, Some("_"), false),

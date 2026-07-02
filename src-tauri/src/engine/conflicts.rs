@@ -176,6 +176,39 @@ mod tests {
     }
 
     #[test]
+    fn annotate_unicode_case_insensitive_collision() {
+        let entries = vec![entry("a.txt", "/dir"), entry("b.txt", "/dir")];
+        let mut rows = vec![
+            row("a.txt", "a.txt", "CAFÉ.txt", RowStatus::Changed),
+            row("b.txt", "b.txt", "café.txt", RowStatus::Changed),
+        ];
+        annotate(&entries, &mut rows);
+        assert_eq!(rows[0].status, RowStatus::Conflict);
+        assert_eq!(rows[1].status, RowStatus::Conflict);
+    }
+
+    #[test]
+    fn annotate_does_not_detect_nfc_nfd_normalization_collisions() {
+        // Both render as "café.txt" but are byte-for-byte different: NFC uses a precomposed
+        // é (U+00E9); NFD uses "e" + a combining acute accent (U+0301) — the form macOS's
+        // APFS/HFS+ historically normalize filenames to. `annotate` does a plain lowercased
+        // string compare with no Unicode normalization, so these are NOT flagged as colliding,
+        // even though they could resolve to the same path on a normalization-folding
+        // filesystem. Known, accepted v1 limitation — this test pins current behavior rather
+        // than fixing it.
+        let nfc_name = "caf\u{00E9}.txt";
+        let nfd_name = "cafe\u{0301}.txt";
+        let entries = vec![entry("a.txt", "/dir"), entry("b.txt", "/dir")];
+        let mut rows = vec![
+            row("a.txt", "a.txt", nfc_name, RowStatus::Changed),
+            row("b.txt", "b.txt", nfd_name, RowStatus::Changed),
+        ];
+        annotate(&entries, &mut rows);
+        assert_eq!(rows[0].status, RowStatus::Changed);
+        assert_eq!(rows[1].status, RowStatus::Changed);
+    }
+
+    #[test]
     fn annotate_changed_collides_with_unchanged_sibling() {
         let entries = vec![entry("a.txt", "/dir"), entry("foo.txt", "/dir")];
         let mut rows = vec![

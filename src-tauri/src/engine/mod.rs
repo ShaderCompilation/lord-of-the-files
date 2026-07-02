@@ -294,6 +294,27 @@ mod tests {
     }
 
     #[test]
+    fn unicode_stem_survives_find_replace_and_case_change() {
+        let entries = vec![entry("a", "/dir", "café résumé 日本語", "txt")];
+        let pipeline = Pipeline {
+            steps: vec![
+                step(
+                    Scope::Stem,
+                    Step::FindReplace {
+                        find: "résumé".to_string(),
+                        replace: "CV".to_string(),
+                        case_sensitive: true,
+                        all_occurrences: true,
+                    },
+                ),
+                step(Scope::Stem, Step::ChangeCase { mode: CaseMode::Upper }),
+            ],
+        };
+        let (rows, _) = run_pipeline(&entries, &pipeline);
+        assert_eq!(rows[0].new_name, "CAFÉ CV 日本語.txt");
+    }
+
+    #[test]
     fn counter_reset_per_directory_across_multiple_dirs() {
         let entries = vec![
             entry("a1", "/a", "file", "txt"),

@@ -1,6 +1,6 @@
-// Presets for the "one universal adapter: OpenAI-compatible Chat Completions" approach (see
-// docs/byok-ai-rename-plan.md). Base URL + a default model are prefilled but user-editable —
-// model ids drift, so treat these as a starting point, not a guarantee.
+// Presets for the "one universal adapter: OpenAI-compatible Chat Completions" approach. Base
+// URL + a default model are prefilled but user-editable — model ids drift, so treat these as a
+// starting point, not a guarantee.
 
 export interface ProviderPreset {
   label: string;

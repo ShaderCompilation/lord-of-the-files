@@ -33,6 +33,7 @@ chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1"
 thiserror = "2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+url = "2"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 futures = "0.3"
 tokio = { version = "1", features = ["time", "macros", "rt-multi-thread"] }
@@ -45,3 +46,13 @@ aisdk = { version = "0.5", default-features = false, features = ["openaicompatib
 [dev-dependencies]
 tempfile = "3"
 wiremock = "0.6"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+# panic left at the default ("unwind"), deliberately deviating from create-tauri-app's scaffold
+# default of "abort": every command handler in commands.rs relies on Mutex::lock().map_err(...)
+# to turn a poisoned lock into a graceful per-command error rather than crashing the app —
+# panic = "abort" would turn any single panic anywhere in the process into a full app crash.

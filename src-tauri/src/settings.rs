@@ -174,6 +174,21 @@ pub fn has_api_key(profile_id: &str) -> bool {
     get_api_key(profile_id).is_some_and(|k| !k.is_empty())
 }
 
+/// Rejects any URL scheme other than http/https, so a compromised frontend can't point a
+/// profile's `base_url` at a `file://`, `javascript:`, `data:`, or other non-network scheme
+/// that `ai::generate`/`test_connection` would otherwise build a client against — the
+/// `Authorization` header (and the key it may carry) would go wherever `base_url` points.
+/// Deliberately permissive about *host*: localhost/private IPs are legitimate (the Ollama and
+/// LM Studio presets in `src/lib/providers.ts` both use `http://localhost:...`); only the
+/// scheme is restricted.
+pub fn validate_base_url(base_url: &str) -> Result<(), String> {
+    let url = url::Url::parse(base_url.trim()).map_err(|e| format!("Invalid provider URL: {e}"))?;
+    match url.scheme() {
+        "http" | "https" => Ok(()),
+        other => Err(format!("Provider URL must use http:// or https:// (got \"{other}:\")")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,6 +197,26 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         init_schema(&conn).unwrap();
         conn
+    }
+
+    #[test]
+    fn validate_base_url_accepts_http_and_https() {
+        assert!(validate_base_url("https://api.openai.com/v1").is_ok());
+        assert!(validate_base_url("http://localhost:11434/v1").is_ok()); // Ollama-style
+    }
+
+    #[test]
+    fn validate_base_url_rejects_non_http_schemes() {
+        assert!(validate_base_url("file:///etc/passwd").is_err());
+        assert!(validate_base_url("javascript:alert(1)").is_err());
+        assert!(validate_base_url("data:text/plain,hello").is_err());
+        assert!(validate_base_url("ftp://example.com").is_err());
+    }
+
+    #[test]
+    fn validate_base_url_rejects_empty_or_malformed() {
+        assert!(validate_base_url("").is_err());
+        assert!(validate_base_url("not a url").is_err());
     }
 
     #[test]

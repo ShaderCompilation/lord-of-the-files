@@ -178,6 +178,7 @@ pub fn get_settings(db: State<SettingsDb>) -> Result<SettingsState, String> {
 
 #[tauri::command]
 pub fn upsert_profile(db: State<SettingsDb>, profile: ProviderProfile) -> Result<(), String> {
+    settings::validate_base_url(&profile.base_url)?;
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut state = settings::load_state(&conn);
     match state.profiles.iter_mut().find(|p| p.id == profile.id) {

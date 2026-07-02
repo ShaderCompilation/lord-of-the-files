@@ -1,10 +1,9 @@
 //! BYOK AI rename: dispatches chunks of files to a user-configured OpenAI-compatible
 //! endpoint via the `aisdk` crate, and lenient-parses the JSON the model returns.
 //!
-//! No `response_format`/structured-output is ever requested (see
-//! `docs/byok-ai-rename-plan.md`), so providers/models that would hard-reject that field
-//! still work — we rely entirely on `extract_results` to recover JSON from a plain text
-//! response (fenced in ```json, wrapped in prose, or clean).
+//! No `response_format`/structured-output is ever requested, so providers/models that would
+//! hard-reject that field still work — we rely entirely on `extract_results` to recover JSON
+//! from a plain text response (fenced in ```json, wrapped in prose, or clean).
 
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
@@ -151,19 +150,27 @@ pub async fn generate(
             let started = Instant::now();
             let outcome = match &mock {
                 Some(mock_cfg) => run_mock_chunk(mock_cfg, &chunk, chunk_index, &gen_id).await,
-                None => {
-                    let provider = provider.expect("provider is built whenever mocking is off");
-                    run_chunk(
-                        provider,
-                        system,
-                        user.clone(),
-                        timeout,
-                        chunk_index,
-                        &gen_id,
-                        &cancel,
-                    )
-                    .await
-                }
+                None => match provider {
+                    Some(provider) => {
+                        run_chunk(
+                            provider,
+                            system,
+                            user.clone(),
+                            timeout,
+                            chunk_index,
+                            &gen_id,
+                            &cancel,
+                        )
+                        .await
+                    }
+                    None => Err(ChunkError {
+                        message: "Internal error: no AI provider configured (mocking was off but \
+                                   no client was built) — this is a bug, not a network/provider \
+                                   failure"
+                            .to_string(),
+                        raw_response: None,
+                    }),
+                },
             };
             let elapsed_ms = started.elapsed().as_millis() as u64;
 

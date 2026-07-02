@@ -50,11 +50,10 @@ env var.
   (`base_url` + `model` + key), chunks `FileEntry` batches (`chunk_size`/`concurrency` per
   profile), dispatches with bounded concurrency, and lenient-parses the JSON response (handles
   bare arrays, fenced/prose-wrapped JSON). Deliberately never sends `response_format`/structured
-  output, so incompatible providers can't reject the request — see
-  `docs/byok-ai-rename-plan.md` for the full rationale. Unknown ids from the model are dropped;
-  missing ids fall back to the original name in the engine.
+  output, so incompatible providers can't reject the request. Unknown ids from the model are
+  dropped; missing ids fall back to the original name in the engine.
 - `logging.rs` — wraps `tauri-plugin-log` with a runtime `AtomicBool` toggle (`DEBUG_LOGGING`):
-  warn/error always logged, debug/trace only when the Settings toggle is on. See `docs/logging.md`.
+  warn/error always logged, debug/trace only when the Settings toggle is on.
 - `commands.rs` / `lib.rs` / `types.rs` — thin Tauri command handlers (real logic stays in the
   modules above), plugin/state wiring, and shared IPC types.
 
@@ -87,12 +86,6 @@ is enforced throughout `ai.rs`/`commands.rs`/`settings.rs`).
 `pipelineVersion` → `runPreview` calls `engine::compute_preview` → diffed rows rendered in
 `FileTable`/`DiffText` → `applyAll` calls `history::apply_rename` (two-phase, recorded for
 undo/redo) → `refreshHistory`.
-
-## Reference docs
-
-- `docs/byok-ai-rename-plan.md` — full design for the BYOK AI rename feature (provider adapter
-  choice, chunking/reconciliation, settings/keychain layout, prompt contract).
-- `docs/logging.md` — design for the unified frontend+backend debug logging system.
 
 ##
 

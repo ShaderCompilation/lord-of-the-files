@@ -1,12 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git *)",
-      "Bash(cargo build *)",
-      "Bash(cargo test *)",
-      "Bash(cargo clippy *)",
-      "Bash(pnpm exec tsc *)",
-      "Bash(pnpm build *)"
+      "Bash(git status)",
+      "Bash(git log)",
+      "Bash(cargo build)",
+      "Bash(cargo test)",
+      "Bash(cargo clippy)",
+      "Bash(pnpm exec tsc)",
+      "Bash(pnpm build)"
     ]
   }
 }

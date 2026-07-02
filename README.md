@@ -50,6 +50,19 @@ cd src-tauri && cargo test     # engine, conflicts, history, full scan→apply�
 pnpm exec tsc --noEmit         # frontend type check
 ```
 
+## Build
+
+```bash
+pnpm tauri build
+```
+
+Produces native installers/bundles for the host OS (`bundle.targets` is `"all"` in
+`src-tauri/tauri.conf.json`) — e.g. `.deb`/`.rpm`/AppImage on Linux, `.app`/`.dmg` on macOS,
+NSIS `.exe`/`.msi` on Windows. **Builds are currently unsigned** — no code-signing identity is
+configured, so macOS Gatekeeper and Windows SmartScreen will show an "unknown publisher"
+warning on first launch. See the [Tauri distribution docs](https://v2.tauri.app/distribute/) if
+signing is added later.
+
 ## Layout
 
 ```
@@ -69,8 +82,7 @@ src/
 ## BYOK AI rename
 
 The AI step sends filenames (stem + extension + parent folder hint) and your instruction to
-whichever OpenAI-compatible endpoint is configured as the active provider in Settings — see
-`docs/byok-ai-rename-plan.md` for the full design. No content is ever read from the files
-themselves. Requests are chunked and dispatched with bounded concurrency (both configurable
-per profile); a chunk that errors or times out is counted as a partial failure rather than
-aborting the whole batch.
+whichever OpenAI-compatible endpoint is configured as the active provider in Settings. No
+content is ever read from the files themselves. Requests are chunked and dispatched with
+bounded concurrency (both configurable per profile); a chunk that errors or times out is
+counted as a partial failure rather than aborting the whole batch.

@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "A suite of file tools — starting with a batch file renamer",
   "type": "module",
+  "packageManager": "pnpm@11.8.0",
   "scripts": {
     "start": "vite",
     "dev": "vite",
