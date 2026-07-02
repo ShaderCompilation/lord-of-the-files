@@ -185,11 +185,15 @@ export interface AiGenerateReport {
   warning: string | null;
 }
 
-export interface AiProgressEvent {
-  generationId: string;
-  chunkIndex: number;
-  totalChunks: number;
-  chunkOk: boolean;
-  chunkError: string | null;
-  chunkResultCount: number;
-}
+export type AiProgressEvent =
+  | { kind: "started"; generationId: string; totalChunks: number }
+  | { kind: "chunkStarted"; generationId: string; chunkIndex: number }
+  | {
+      kind: "chunkDone";
+      generationId: string;
+      chunkIndex: number;
+      totalChunks: number;
+      chunkOk: boolean;
+      chunkError: string | null;
+      chunkResultCount: number;
+    };

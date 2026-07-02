@@ -102,6 +102,11 @@ pub async fn generate(
     log::trace!("ai::generate: instruction={prompt}");
     log::trace!("ai::generate: system={system}");
 
+    emitter.emit(AiProgressEvent::Started {
+        generation_id: generation_id.to_string(),
+        total_chunks: total_chunks as u32,
+    });
+
     let tasks = chunks.into_iter().enumerate().map(|(chunk_index, chunk)| {
         let provider = provider.clone();
         let mock = mock.clone();
@@ -120,7 +125,7 @@ pub async fn generate(
                 log::debug!(
                     "ai::generate: generation_id={gen_id} chunk {chunk_index} skipped (already cancelled)"
                 );
-                emitter.emit(AiProgressEvent {
+                emitter.emit(AiProgressEvent::ChunkDone {
                     generation_id: gen_id,
                     chunk_index: chunk_index as u32,
                     total_chunks: total_chunks as u32,
@@ -130,6 +135,11 @@ pub async fn generate(
                 });
                 return (chunk_index, Err("Cancelled".to_string()));
             }
+
+            emitter.emit(AiProgressEvent::ChunkStarted {
+                generation_id: gen_id.clone(),
+                chunk_index: chunk_index as u32,
+            });
 
             log::debug!(
                 "ai::generate: generation_id={gen_id} chunk {chunk_index}/{total_chunks} dispatching {} file(s)",
@@ -164,7 +174,7 @@ pub async fn generate(
             let chunk_ok = outcome.is_ok();
             let chunk_error = outcome.as_ref().err().cloned();
             let chunk_result_count = outcome.as_ref().map(|v| v.len() as u32).unwrap_or(0);
-            emitter.emit(AiProgressEvent {
+            emitter.emit(AiProgressEvent::ChunkDone {
                 generation_id: gen_id,
                 chunk_index: chunk_index as u32,
                 total_chunks: total_chunks as u32,

@@ -403,9 +403,11 @@ export async function confirmPendingAction(): Promise<void> {
 
 export interface AiProgress {
   completedChunks: number;
+  dispatchedChunks: number;
   totalChunks: number;
   suggestedSoFar: number;
   lastChunkError?: string;
+  startedAt: number;
 }
 
 const [aiLoading, setAiLoading] = createSignal<Set<string>>(new Set());
@@ -461,7 +463,13 @@ export async function generateAi(stepId: string, prompt: string): Promise<void> 
     return next;
   });
   setAiProgress((prev) =>
-    new Map(prev).set(stepId, { completedChunks: 0, totalChunks: 0, suggestedSoFar: 0 }),
+    new Map(prev).set(stepId, {
+      completedChunks: 0,
+      dispatchedChunks: 0,
+      totalChunks: 0,
+      suggestedSoFar: 0,
+      startedAt: Date.now(),
+    }),
   );
   setAiBusy(stepId, true);
   log.info(
@@ -482,22 +490,37 @@ export async function generateAi(stepId: string, prompt: string): Promise<void> 
       );
       return;
     }
-    log.debug(
-      `generateAi progress: chunk ${p.chunkIndex + 1}/${p.totalChunks} ok=${p.chunkOk} ` +
-        `results=${p.chunkResultCount}${p.chunkError ? ` err=${p.chunkError}` : ""}`,
-    );
     setAiProgress((prev) => {
       const cur = prev.get(stepId) ?? {
         completedChunks: 0,
-        totalChunks: p.totalChunks,
+        dispatchedChunks: 0,
+        totalChunks: 0,
         suggestedSoFar: 0,
+        startedAt: Date.now(),
       };
-      return new Map(prev).set(stepId, {
-        completedChunks: cur.completedChunks + 1,
-        totalChunks: p.totalChunks,
-        suggestedSoFar: cur.suggestedSoFar + p.chunkResultCount,
-        lastChunkError: p.chunkOk ? cur.lastChunkError : (p.chunkError ?? cur.lastChunkError),
-      });
+      switch (p.kind) {
+        case "started":
+          log.debug(`generateAi progress: started, totalChunks=${p.totalChunks}`);
+          return new Map(prev).set(stepId, { ...cur, totalChunks: p.totalChunks });
+        case "chunkStarted":
+          log.debug(`generateAi progress: chunk ${p.chunkIndex + 1} dispatched`);
+          return new Map(prev).set(stepId, {
+            ...cur,
+            dispatchedChunks: cur.dispatchedChunks + 1,
+          });
+        case "chunkDone":
+          log.debug(
+            `generateAi progress: chunk ${p.chunkIndex + 1}/${p.totalChunks} ok=${p.chunkOk} ` +
+              `results=${p.chunkResultCount}${p.chunkError ? ` err=${p.chunkError}` : ""}`,
+          );
+          return new Map(prev).set(stepId, {
+            ...cur,
+            completedChunks: cur.completedChunks + 1,
+            totalChunks: p.totalChunks,
+            suggestedSoFar: cur.suggestedSoFar + p.chunkResultCount,
+            lastChunkError: p.chunkOk ? cur.lastChunkError : (p.chunkError ?? cur.lastChunkError),
+          });
+      }
     });
   });
 

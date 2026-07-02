@@ -722,16 +722,41 @@ textarea:focus {
   min-width: 0;
 }
 .ai-progress-bar {
+  position: relative;
   flex: 1;
   height: 6px;
   border-radius: 3px;
   background: var(--bg-input);
   overflow: hidden;
 }
-.ai-progress-fill {
+.ai-progress-fill,
+.ai-progress-fill-inflight {
+  position: absolute;
+  inset: 0 auto 0 0;
   height: 100%;
-  background: var(--ai);
   transition: width 150ms ease-out;
+}
+.ai-progress-fill {
+  background: var(--ai);
+}
+.ai-progress-fill-inflight {
+  background: repeating-linear-gradient(
+    45deg,
+    color-mix(in srgb, var(--ai) 35%, transparent),
+    color-mix(in srgb, var(--ai) 35%, transparent) 6px,
+    transparent 6px,
+    transparent 12px
+  );
+  background-size: 17px 17px;
+  animation: ai-progress-stripes 600ms linear infinite;
+}
+@keyframes ai-progress-stripes {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 17px 0;
+  }
 }
 .ai-progress-error {
   color: var(--red);

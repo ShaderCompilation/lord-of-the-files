@@ -1,4 +1,4 @@
-import { For, Show } from "solid-js";
+import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
 
 import * as s from "../../store";
 import { Button, SelectField, TextareaField } from "../common";
@@ -11,6 +11,26 @@ export function AiFields(props: { step: Variant<"ai">; set: SetFn; id: string })
   const pct = () => {
     const p = progress();
     return p && p.totalChunks > 0 ? Math.round((p.completedChunks / p.totalChunks) * 100) : 0;
+  };
+  const pctInFlight = () => {
+    const p = progress();
+    return p && p.totalChunks > 0 ? Math.round((p.dispatchedChunks / p.totalChunks) * 100) : 0;
+  };
+  const inFlight = () => {
+    const p = progress();
+    return p ? Math.max(0, p.dispatchedChunks - p.completedChunks) : 0;
+  };
+
+  const [tick, setTick] = createSignal(0);
+  createEffect(() => {
+    if (!running()) return;
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    onCleanup(() => clearInterval(id));
+  });
+  const elapsedSeconds = () => {
+    tick();
+    const startedAt = progress()?.startedAt;
+    return startedAt ? Math.floor((Date.now() - startedAt) / 1000) : 0;
   };
 
   return (
@@ -65,12 +85,16 @@ export function AiFields(props: { step: Variant<"ai">; set: SetFn; id: string })
         >
           <div class="ai-progress">
             <div class="ai-progress-bar">
+              <div class="ai-progress-fill-inflight" style={{ width: `${pctInFlight()}%` }} />
               <div class="ai-progress-fill" style={{ width: `${pct()}%` }} />
             </div>
             <span class="muted small">
               batch {progress()?.completedChunks ?? 0} / {progress()?.totalChunks || "?"}
+              <Show when={inFlight() > 0}>{` (${inFlight()} in progress)`}</Show>
               {" · "}
               {progress()?.suggestedSoFar ?? 0} suggested
+              {" · "}
+              {elapsedSeconds()}s
             </span>
           </div>
         </Show>
