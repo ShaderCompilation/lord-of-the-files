@@ -7,7 +7,6 @@
 //! response (fenced in ```json, wrapped in prose, or clean).
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use aisdk::core::{DynamicModel, LanguageModelRequest};
@@ -17,25 +16,12 @@ use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
 use crate::settings::{MockAiConfig, MockTransform, ProviderProfile};
-use crate::types::{AiGenerateReport, AiProgressEvent, AiResultItem, FileEntry};
+use crate::types::{AiGenerateReport, AiResultItem, FileEntry};
 
 /// Placeholder sent when a profile has no key configured (e.g. local Ollama / LM Studio),
 /// since `aisdk`'s `OpenAICompatible` builder rejects an empty `api_key` even though these
 /// local servers never check the `Authorization` header.
 const NO_KEY_PLACEHOLDER: &str = "not-needed";
-
-/// Seam between `ai::generate`'s per-chunk progress and however the caller wants to surface
-/// it. Exists so unit tests (which run outside a Tauri `AppHandle`) can pass a no-op
-/// implementation instead of needing a live Tauri app.
-pub trait AiProgressEmitter: Send + Sync {
-    fn emit(&self, event: AiProgressEvent);
-}
-
-pub struct NoopProgressEmitter;
-
-impl AiProgressEmitter for NoopProgressEmitter {
-    fn emit(&self, _event: AiProgressEvent) {}
-}
 
 #[allow(clippy::too_many_arguments)]
 pub async fn generate(
@@ -44,7 +30,6 @@ pub async fn generate(
     prompt: String,
     entries: Vec<FileEntry>,
     generation_id: &str,
-    emitter: Arc<dyn AiProgressEmitter>,
     mock: Option<MockAiConfig>,
     cancel: CancellationToken,
 ) -> Result<AiGenerateReport, String> {
@@ -102,11 +87,6 @@ pub async fn generate(
     log::trace!("ai::generate: instruction={prompt}");
     log::trace!("ai::generate: system={system}");
 
-    emitter.emit(AiProgressEvent::Started {
-        generation_id: generation_id.to_string(),
-        total_chunks: total_chunks as u32,
-    });
-
     let tasks = chunks.into_iter().enumerate().map(|(chunk_index, chunk)| {
         let provider = provider.clone();
         let mock = mock.clone();
@@ -118,28 +98,14 @@ pub async fn generate(
         let exts: HashMap<String, String> =
             chunk.iter().map(|e| (e.id.clone(), e.ext.clone())).collect();
         let gen_id = generation_id.to_string();
-        let emitter = Arc::clone(&emitter);
         let cancel = cancel.clone();
         async move {
             if cancel.is_cancelled() {
                 log::debug!(
                     "ai::generate: generation_id={gen_id} chunk {chunk_index} skipped (already cancelled)"
                 );
-                emitter.emit(AiProgressEvent::ChunkDone {
-                    generation_id: gen_id,
-                    chunk_index: chunk_index as u32,
-                    total_chunks: total_chunks as u32,
-                    chunk_ok: false,
-                    chunk_error: Some("Cancelled".to_string()),
-                    chunk_result_count: 0,
-                });
                 return (chunk_index, Err("Cancelled".to_string()));
             }
-
-            emitter.emit(AiProgressEvent::ChunkStarted {
-                generation_id: gen_id.clone(),
-                chunk_index: chunk_index as u32,
-            });
 
             log::debug!(
                 "ai::generate: generation_id={gen_id} chunk {chunk_index}/{total_chunks} dispatching {} file(s)",
@@ -170,18 +136,6 @@ pub async fn generate(
                     "ai::generate: generation_id={gen_id} chunk {chunk_index} failed after {elapsed_ms}ms: {e}"
                 );
             }
-
-            let chunk_ok = outcome.is_ok();
-            let chunk_error = outcome.as_ref().err().cloned();
-            let chunk_result_count = outcome.as_ref().map(|v| v.len() as u32).unwrap_or(0);
-            emitter.emit(AiProgressEvent::ChunkDone {
-                generation_id: gen_id,
-                chunk_index: chunk_index as u32,
-                total_chunks: total_chunks as u32,
-                chunk_ok,
-                chunk_error,
-                chunk_result_count,
-            });
 
             (chunk_index, outcome)
         }
@@ -915,7 +869,6 @@ mod tests {
             "rename".to_string(),
             vec![entry("a", "old", "txt")],
             "test-gen",
-            Arc::new(NoopProgressEmitter),
             None,
             CancellationToken::new(),
         )
@@ -945,7 +898,6 @@ mod tests {
             "rename".to_string(),
             entries,
             "test-gen",
-            Arc::new(NoopProgressEmitter),
             None,
             CancellationToken::new(),
         )
@@ -982,7 +934,6 @@ mod tests {
             "rename".to_string(),
             entries,
             "test-gen",
-            Arc::new(NoopProgressEmitter),
             None,
             CancellationToken::new(),
         )
@@ -1017,7 +968,6 @@ mod tests {
             "rename".to_string(),
             entries,
             "test-gen",
-            Arc::new(NoopProgressEmitter),
             None,
             CancellationToken::new(),
         )
@@ -1057,7 +1007,6 @@ mod tests {
             "rename".to_string(),
             entries,
             "test-gen",
-            Arc::new(NoopProgressEmitter),
             None,
             CancellationToken::new(),
         )
@@ -1092,7 +1041,6 @@ mod tests {
             "rename".to_string(),
             entries,
             "test-gen",
-            Arc::new(NoopProgressEmitter),
             None,
             CancellationToken::new(),
         )
@@ -1122,7 +1070,6 @@ mod tests {
             "rename".to_string(),
             entries,
             "test-gen",
-            Arc::new(NoopProgressEmitter),
             None,
             CancellationToken::new(),
         )
@@ -1160,7 +1107,6 @@ mod tests {
             "rename".to_string(),
             entries,
             "test-gen",
-            Arc::new(NoopProgressEmitter),
             None,
             cancel,
         )
@@ -1182,7 +1128,6 @@ mod tests {
             "rename".to_string(),
             entries,
             "test-gen",
-            Arc::new(NoopProgressEmitter),
             None,
             cancel,
         )
@@ -1210,7 +1155,6 @@ mod tests {
             "rename".to_string(),
             vec![entry("a", "old", "txt")],
             "test-gen",
-            Arc::new(NoopProgressEmitter),
             Some(mock),
             CancellationToken::new(),
         )
@@ -1237,7 +1181,6 @@ mod tests {
             "rename".to_string(),
             vec![entry("a", "old", "txt")],
             "test-gen",
-            Arc::new(NoopProgressEmitter),
             Some(mock),
             CancellationToken::new(),
         )

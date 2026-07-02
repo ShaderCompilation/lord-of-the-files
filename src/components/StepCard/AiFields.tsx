@@ -6,31 +6,23 @@ import type { SetFn, Variant } from "./types";
 
 export function AiFields(props: { step: Variant<"ai">; set: SetFn; id: string }) {
   const running = () => s.isAiLoading(props.id);
-  const progress = () => s.aiProgressFor(props.id);
   const error = () => s.aiErrorFor(props.id);
-  const pct = () => {
-    const p = progress();
-    return p && p.totalChunks > 0 ? Math.round((p.completedChunks / p.totalChunks) * 100) : 0;
-  };
-  const pctInFlight = () => {
-    const p = progress();
-    return p && p.totalChunks > 0 ? Math.round((p.dispatchedChunks / p.totalChunks) * 100) : 0;
-  };
-  const inFlight = () => {
-    const p = progress();
-    return p ? Math.max(0, p.dispatchedChunks - p.completedChunks) : 0;
-  };
 
+  const [startedAt, setStartedAt] = createSignal<number>();
   const [tick, setTick] = createSignal(0);
   createEffect(() => {
-    if (!running()) return;
+    if (!running()) {
+      setStartedAt(undefined);
+      return;
+    }
+    setStartedAt(Date.now());
     const id = setInterval(() => setTick((t) => t + 1), 1000);
     onCleanup(() => clearInterval(id));
   });
   const elapsedSeconds = () => {
     tick();
-    const startedAt = progress()?.startedAt;
-    return startedAt ? Math.floor((Date.now() - startedAt) / 1000) : 0;
+    const start = startedAt();
+    return start ? Math.floor((Date.now() - start) / 1000) : 0;
   };
 
   return (
@@ -85,24 +77,12 @@ export function AiFields(props: { step: Variant<"ai">; set: SetFn; id: string })
         >
           <div class="ai-progress">
             <div class="ai-progress-bar">
-              <div class="ai-progress-fill-inflight" style={{ width: `${pctInFlight()}%` }} />
-              <div class="ai-progress-fill" style={{ width: `${pct()}%` }} />
+              <div class="ai-progress-fill" />
             </div>
-            <span class="muted small">
-              batch {progress()?.completedChunks ?? 0} / {progress()?.totalChunks || "?"}
-              <Show when={inFlight() > 0}>{` (${inFlight()} in progress)`}</Show>
-              {" · "}
-              {progress()?.suggestedSoFar ?? 0} suggested
-              {" · "}
-              {elapsedSeconds()}s
-            </span>
+            <span class="muted small">Generating… {elapsedSeconds()}s</span>
           </div>
         </Show>
       </div>
-
-      <Show when={running() && progress()?.lastChunkError}>
-        <p class="muted small ai-progress-error">Latest batch error: {progress()!.lastChunkError}</p>
-      </Show>
 
       <Show when={error()}>
         <p class="step-error">{error()}</p>

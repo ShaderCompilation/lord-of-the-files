@@ -1,9 +1,7 @@
 //! Thin Tauri command handlers. All real logic lives in `engine`, `fs_scan`, `history`,
 //! `settings`, and `ai`; these just adapt types and lock shared state.
 
-use std::sync::Arc;
-
-use tauri::{Emitter, State};
+use tauri::State;
 use tokio_util::sync::CancellationToken;
 
 use crate::ai;
@@ -14,19 +12,7 @@ use crate::history::{
     self, ApplyReport, FileCheck, HistoryDb, Operation, RenameEntry, RenameItem, UndoReport,
 };
 use crate::settings::{self, MockAiConfig, ProviderProfile, SettingsDb, SettingsState};
-use crate::types::{AiGenerateReport, AiProgressEvent, FileEntry, Pipeline, PreviewResult};
-
-/// Broadcasts `ai::generate`'s per-chunk progress to the frontend via a Tauri event. Kept
-/// here (not in `ai.rs`) so the `ai` module stays free of any Tauri-specific types.
-struct TauriProgressEmitter(tauri::AppHandle);
-
-impl ai::AiProgressEmitter for TauriProgressEmitter {
-    fn emit(&self, event: AiProgressEvent) {
-        if let Err(e) = self.0.emit("ai-generate-progress", event) {
-            log::warn!("ai-generate-progress emit failed: {e}");
-        }
-    }
-}
+use crate::types::{AiGenerateReport, FileEntry, Pipeline, PreviewResult};
 
 #[tauri::command]
 pub fn scan_paths(paths: Vec<String>, recursive: bool, include_dirs: bool) -> Vec<FileEntry> {
@@ -122,7 +108,6 @@ fn active_profile(state: &SettingsState) -> Result<ProviderProfile, String> {
 
 #[tauri::command]
 pub async fn ai_generate(
-    app: tauri::AppHandle,
     db: State<'_, SettingsDb>,
     registry: State<'_, AiGenerationRegistry>,
     prompt: String,
@@ -147,9 +132,8 @@ pub async fn ai_generate(
         prompt.len()
     );
     log::trace!("ai_generate: prompt={prompt}");
-    let emitter: Arc<dyn ai::AiProgressEmitter> = Arc::new(TauriProgressEmitter(app));
     let token = registry.register(generation_id.clone());
-    let result = ai::generate(&profile, &key, prompt, entries, &generation_id, emitter, mock, token).await;
+    let result = ai::generate(&profile, &key, prompt, entries, &generation_id, mock, token).await;
     registry.remove(&generation_id);
     result
 }
@@ -287,7 +271,6 @@ pub async fn test_connection(db: State<'_, SettingsDb>, profile_id: String) -> R
         "Echo the original name".to_string(),
         entries,
         "test-connection",
-        Arc::new(ai::NoopProgressEmitter),
         None, // always exercises the real provider, even if Mock AI is on
         CancellationToken::new(),
     )

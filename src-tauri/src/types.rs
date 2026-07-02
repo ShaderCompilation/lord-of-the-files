@@ -91,33 +91,6 @@ pub struct AiGenerateReport {
     pub warning: Option<String>,
 }
 
-/// Emitted during `ai::generate` so the frontend can render live progress. Purely
-/// informational — `AiGenerateReport` (the command's return value) remains the source of truth
-/// for final results. Three variants cover the lifecycle of a generation: `Started` fires once
-/// upfront (so the frontend learns `total_chunks` immediately instead of waiting on the first
-/// chunk to finish), `ChunkStarted` fires when a chunk is actually dispatched (i.e. when
-/// `buffer_unordered` polls its future), and `ChunkDone` fires when a chunk resolves.
-#[derive(Serialize, Clone, Debug)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum AiProgressEvent {
-    Started {
-        generation_id: String,
-        total_chunks: u32,
-    },
-    ChunkStarted {
-        generation_id: String,
-        chunk_index: u32,
-    },
-    ChunkDone {
-        generation_id: String,
-        chunk_index: u32,
-        total_chunks: u32,
-        chunk_ok: bool,
-        chunk_error: Option<String>,
-        chunk_result_count: u32,
-    },
-}
-
 /// The transform variants. Internally tagged by `type` so the TS union is ergonomic.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]

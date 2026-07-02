@@ -1,7 +1,6 @@
 // Central reactive state + actions for the renamer. Kept in one module so the reactive
 // graph (files -> pipeline -> preview) lives in one place and avoids circular imports.
 
-import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { createSignal } from "solid-js";
 import { createStore, produce } from "solid-js/store";
@@ -10,7 +9,6 @@ import * as ipc from "./lib/ipc";
 import { log } from "./lib/log";
 import { defaultStep } from "./lib/steps";
 import type {
-  AiProgressEvent,
   AiResultItem,
   FileCheck,
   Failure,
@@ -401,25 +399,12 @@ export async function confirmPendingAction(): Promise<void> {
 
 // ---- AI step ---------------------------------------------------------------------------
 
-export interface AiProgress {
-  completedChunks: number;
-  dispatchedChunks: number;
-  totalChunks: number;
-  suggestedSoFar: number;
-  lastChunkError?: string;
-  startedAt: number;
-}
-
 const [aiLoading, setAiLoading] = createSignal<Set<string>>(new Set());
-const [aiProgress, setAiProgress] = createSignal<Map<string, AiProgress>>(new Map());
 const [aiStepError, setAiStepError] = createSignal<Map<string, string>>(new Map());
 const [aiGenerationId, setAiGenerationId] = createSignal<Map<string, string>>(new Map());
 
 export function isAiLoading(stepId: string): boolean {
   return aiLoading().has(stepId);
-}
-export function aiProgressFor(stepId: string): AiProgress | undefined {
-  return aiProgress().get(stepId);
 }
 export function aiErrorFor(stepId: string): string | undefined {
   return aiStepError().get(stepId);
@@ -462,15 +447,6 @@ export async function generateAi(stepId: string, prompt: string): Promise<void> 
     next.delete(stepId);
     return next;
   });
-  setAiProgress((prev) =>
-    new Map(prev).set(stepId, {
-      completedChunks: 0,
-      dispatchedChunks: 0,
-      totalChunks: 0,
-      suggestedSoFar: 0,
-      startedAt: Date.now(),
-    }),
-  );
   setAiBusy(stepId, true);
   log.info(
     `generateAi: step=${stepId}, generation=${generationId}, ${entries.length} entries, ` +
@@ -481,48 +457,6 @@ export async function generateAi(stepId: string, prompt: string): Promise<void> 
   log.trace(`generateAi: prompt=${prompt}`);
 
   const isLive = () => aiGenerationId().get(stepId) === generationId;
-
-  const unlisten = await listen<AiProgressEvent>("ai-generate-progress", (e) => {
-    const p = e.payload;
-    if (p.generationId !== generationId || !isLive()) {
-      log.trace(
-        `generateAi progress: ignored stale event generation=${p.generationId} (expected ${generationId})`,
-      );
-      return;
-    }
-    setAiProgress((prev) => {
-      const cur = prev.get(stepId) ?? {
-        completedChunks: 0,
-        dispatchedChunks: 0,
-        totalChunks: 0,
-        suggestedSoFar: 0,
-        startedAt: Date.now(),
-      };
-      switch (p.kind) {
-        case "started":
-          log.debug(`generateAi progress: started, totalChunks=${p.totalChunks}`);
-          return new Map(prev).set(stepId, { ...cur, totalChunks: p.totalChunks });
-        case "chunkStarted":
-          log.debug(`generateAi progress: chunk ${p.chunkIndex + 1} dispatched`);
-          return new Map(prev).set(stepId, {
-            ...cur,
-            dispatchedChunks: cur.dispatchedChunks + 1,
-          });
-        case "chunkDone":
-          log.debug(
-            `generateAi progress: chunk ${p.chunkIndex + 1}/${p.totalChunks} ok=${p.chunkOk} ` +
-              `results=${p.chunkResultCount}${p.chunkError ? ` err=${p.chunkError}` : ""}`,
-          );
-          return new Map(prev).set(stepId, {
-            ...cur,
-            completedChunks: cur.completedChunks + 1,
-            totalChunks: p.totalChunks,
-            suggestedSoFar: cur.suggestedSoFar + p.chunkResultCount,
-            lastChunkError: p.chunkOk ? cur.lastChunkError : (p.chunkError ?? cur.lastChunkError),
-          });
-      }
-    });
-  });
 
   try {
     const report = await ipc.aiGenerate(prompt, entries, generationId);
@@ -577,14 +511,8 @@ export async function generateAi(stepId: string, prompt: string): Promise<void> 
     setAiStepError((prev) => new Map(prev).set(stepId, String(e)));
     setNotice(`AI request failed: ${String(e)}`);
   } finally {
-    unlisten();
     if (isLive()) {
       setAiBusy(stepId, false);
-      setAiProgress((prev) => {
-        const next = new Map(prev);
-        next.delete(stepId);
-        return next;
-      });
     }
   }
 }
@@ -597,11 +525,6 @@ export function cancelAi(stepId: string): void {
     return next;
   });
   setAiBusy(stepId, false);
-  setAiProgress((prev) => {
-    const next = new Map(prev);
-    next.delete(stepId);
-    return next;
-  });
   log.info(
     `cancelAi: step=${stepId}${generationId ? `, generation=${generationId}` : ""}`,
   );
