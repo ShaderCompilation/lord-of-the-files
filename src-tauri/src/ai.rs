@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
 use crate::settings::{MockAiConfig, MockTransform, ProviderProfile};
-use crate::types::{AiGenerateReport, AiResultItem, FileEntry};
+use crate::types::{AiChunkDetail, AiGenerateReport, AiRequestMeta, AiResultItem, FileEntry};
 
 /// Placeholder sent when a profile has no key configured (e.g. local Ollama / LM Studio),
 /// since `aisdk`'s `OpenAICompatible` builder rejects an empty `api_key` even though these
@@ -32,10 +32,41 @@ pub async fn generate(
     generation_id: &str,
     mock: Option<MockAiConfig>,
     cancel: CancellationToken,
-) -> Result<AiGenerateReport, String> {
+) -> AiGenerateReport {
     // Belt-and-suspenders: a release binary never mocks, even if `enabled` was left on in
     // settings.db by a previous dev build, or a command were invoked directly.
     let mock = if cfg!(debug_assertions) { mock } else { None };
+
+    let chunk_size = (cfg.chunk_size as usize).max(1);
+    let concurrency = (cfg.concurrency as usize).max(1);
+    let timeout = Duration::from_secs(cfg.timeout_secs.max(1) as u64);
+    let system = system_prompt(cfg.max_len);
+    let entry_count = entries.len();
+    let has_key = !api_key.is_empty();
+
+    let request = AiRequestMeta {
+        generation_id: generation_id.to_string(),
+        created_at: chrono::Utc::now().to_rfc3339(),
+        profile_id: cfg.id.clone(),
+        profile_label: cfg.label.clone(),
+        base_url: cfg.base_url.clone(),
+        model: cfg.model.clone(),
+        instruction: prompt.clone(),
+        system_prompt: system.clone(),
+        entry_count,
+        chunk_size: chunk_size as u32,
+        concurrency: concurrency as u32,
+        timeout_secs: cfg.timeout_secs,
+        max_len: cfg.max_len,
+        temperature: 0.0,
+        mock: mock.is_some(),
+        has_key,
+    };
+
+    if cancel.is_cancelled() {
+        log::debug!("ai::generate: generation_id={generation_id} cancelled before dispatch");
+        return empty_report(request, "Cancelled".to_string());
+    }
 
     let key = if api_key.is_empty() {
         NO_KEY_PLACEHOLDER
@@ -45,32 +76,21 @@ pub async fn generate(
     // Skip building a real client entirely when mocking — `cfg.base_url`/`model` don't need to
     // be valid (or even set) for a mocked generation.
     let provider = if mock.is_none() {
-        Some(
-            OpenAICompatible::<DynamicModel>::builder()
-                .base_url(&cfg.base_url)
-                .api_key(key)
-                .model_name(&cfg.model)
-                .build()
-                .map_err(|e| e.to_string())?,
-        )
+        match OpenAICompatible::<DynamicModel>::builder()
+            .base_url(&cfg.base_url)
+            .api_key(key)
+            .model_name(&cfg.model)
+            .build()
+        {
+            Ok(p) => Some(p),
+            Err(e) => return empty_report(request, e.to_string()),
+        }
     } else {
         None
     };
 
-    let chunk_size = (cfg.chunk_size as usize).max(1);
-    let concurrency = (cfg.concurrency as usize).max(1);
-    let timeout = Duration::from_secs(cfg.timeout_secs.max(1) as u64);
-    let system = system_prompt(cfg.max_len);
-    let entry_count = entries.len();
-
-    if cancel.is_cancelled() {
-        log::debug!("ai::generate: generation_id={generation_id} cancelled before dispatch");
-        return Err("Cancelled".to_string());
-    }
-
     let chunks = chunk_entries(entries, chunk_size);
     let total_chunks = chunks.len();
-    let has_key = !api_key.is_empty();
     let mock_on = mock.is_some();
 
     log::info!(
@@ -92,6 +112,7 @@ pub async fn generate(
         let mock = mock.clone();
         let system = system.clone();
         let user = user_prompt(&prompt, &chunk, chunk_index * chunk_size);
+        let file_count = chunk.len();
         let ids: HashSet<String> = chunk.iter().map(|e| e.id.clone()).collect();
         let stems: HashMap<String, String> =
             chunk.iter().map(|e| (e.id.clone(), e.stem.clone())).collect();
@@ -104,12 +125,24 @@ pub async fn generate(
                 log::debug!(
                     "ai::generate: generation_id={gen_id} chunk {chunk_index} skipped (already cancelled)"
                 );
-                return (chunk_index, Err("Cancelled".to_string()));
+                let detail = AiChunkDetail {
+                    chunk_index,
+                    file_count,
+                    user_prompt: user,
+                    raw_response: None,
+                    error: Some("Cancelled".to_string()),
+                    parse_path: None,
+                    elapsed_ms: 0,
+                    model_count: None,
+                    dropped_unknown: None,
+                    sanitized_count: None,
+                    missing_ids: Vec::new(),
+                };
+                return (chunk_index, Err("Cancelled".to_string()), detail);
             }
 
             log::debug!(
-                "ai::generate: generation_id={gen_id} chunk {chunk_index}/{total_chunks} dispatching {} file(s)",
-                chunk.len()
+                "ai::generate: generation_id={gen_id} chunk {chunk_index}/{total_chunks} dispatching {file_count} file(s)"
             );
             log::trace!(
                 "ai::generate: generation_id={gen_id} chunk {chunk_index} user_prompt={user}"
@@ -120,35 +153,81 @@ pub async fn generate(
                 Some(mock_cfg) => run_mock_chunk(mock_cfg, &chunk, chunk_index, &gen_id).await,
                 None => {
                     let provider = provider.expect("provider is built whenever mocking is off");
-                    run_chunk(provider, system, user, timeout, chunk_index, &gen_id, &cancel).await
+                    run_chunk(
+                        provider,
+                        system,
+                        user.clone(),
+                        timeout,
+                        chunk_index,
+                        &gen_id,
+                        &cancel,
+                    )
+                    .await
                 }
             };
-            let elapsed_ms = started.elapsed().as_millis();
+            let elapsed_ms = started.elapsed().as_millis() as u64;
 
-            let outcome = outcome.map(|parsed| {
-                let report = reconcile(parsed.items, &ids, &stems, &exts, &gen_id);
-                log_chunk_reconcile(chunk_index, &gen_id, &report, &stems, parsed.parse_path, elapsed_ms);
-                report.items
-            });
+            let (result, detail) = match outcome {
+                Ok(parsed) => {
+                    let report = reconcile(parsed.items, &ids, &stems, &exts, &gen_id);
+                    log_chunk_reconcile(
+                        chunk_index,
+                        &gen_id,
+                        &report,
+                        &stems,
+                        parsed.parse_path,
+                        elapsed_ms as u128,
+                    );
+                    let detail = AiChunkDetail {
+                        chunk_index,
+                        file_count,
+                        user_prompt: user,
+                        raw_response: Some(parsed.raw_text),
+                        error: None,
+                        parse_path: Some(parsed.parse_path.as_str().to_string()),
+                        elapsed_ms,
+                        model_count: Some(report.model_count),
+                        dropped_unknown: Some(report.dropped_unknown),
+                        sanitized_count: Some(report.sanitized_count),
+                        missing_ids: report.missing_ids.clone(),
+                    };
+                    (Ok(report.items), detail)
+                }
+                Err(e) => {
+                    log::warn!(
+                        "ai::generate: generation_id={gen_id} chunk {chunk_index} failed after {elapsed_ms}ms: {}",
+                        e.message
+                    );
+                    let detail = AiChunkDetail {
+                        chunk_index,
+                        file_count,
+                        user_prompt: user,
+                        raw_response: e.raw_response,
+                        error: Some(e.message.clone()),
+                        parse_path: None,
+                        elapsed_ms,
+                        model_count: None,
+                        dropped_unknown: None,
+                        sanitized_count: None,
+                        missing_ids: Vec::new(),
+                    };
+                    (Err(e.message), detail)
+                }
+            };
 
-            if let Err(e) = &outcome {
-                log::warn!(
-                    "ai::generate: generation_id={gen_id} chunk {chunk_index} failed after {elapsed_ms}ms: {e}"
-                );
-            }
-
-            (chunk_index, outcome)
+            (chunk_index, result, detail)
         }
     });
 
-    let mut by_chunk: Vec<(usize, Result<Vec<AiResultItem>, String>)> =
+    let mut by_chunk: Vec<(usize, Result<Vec<AiResultItem>, String>, AiChunkDetail)> =
         stream::iter(tasks).buffer_unordered(concurrency).collect().await;
-    by_chunk.sort_by_key(|(i, _)| *i);
+    by_chunk.sort_by_key(|(i, _, _)| *i);
 
     let mut results = Vec::new();
     let mut failed_chunks = 0u32;
     let mut first_error: Option<String> = None;
-    for (_, outcome) in by_chunk {
+    let mut chunk_details = Vec::with_capacity(by_chunk.len());
+    for (_, outcome, detail) in by_chunk {
         match outcome {
             Ok(items) => results.extend(items),
             Err(e) => {
@@ -156,12 +235,21 @@ pub async fn generate(
                 first_error.get_or_insert(e);
             }
         }
+        chunk_details.push(detail);
     }
 
     if total_chunks > 0 && failed_chunks as usize == total_chunks {
         let err = first_error.unwrap_or_else(|| "AI generation failed".to_string());
         log::warn!("ai::generate: generation_id={generation_id} all chunks failed: {err}");
-        return Err(err);
+        return AiGenerateReport {
+            results,
+            failed_chunks,
+            total_chunks: total_chunks as u32,
+            warning: None,
+            error: Some(err),
+            request,
+            chunks: chunk_details,
+        };
     }
 
     let warning = (failed_chunks > 0).then(|| {
@@ -181,12 +269,30 @@ pub async fn generate(
         results.len()
     );
 
-    Ok(AiGenerateReport {
+    AiGenerateReport {
         results,
         failed_chunks,
         total_chunks: total_chunks as u32,
         warning,
-    })
+        error: None,
+        request,
+        chunks: chunk_details,
+    }
+}
+
+/// Builds a report for a generation that never dispatched any chunk at all (cancelled before
+/// dispatch, or the provider client failed to build) — still carries full request metadata so
+/// the attempt stays inspectable in AI History, just with no chunk detail to show.
+fn empty_report(request: AiRequestMeta, error: String) -> AiGenerateReport {
+    AiGenerateReport {
+        results: Vec::new(),
+        failed_chunks: 0,
+        total_chunks: 0,
+        warning: None,
+        error: Some(error),
+        request,
+        chunks: Vec::new(),
+    }
 }
 
 /// Split `entries` into contiguous, order-preserving, owned chunks of at most `size`. Chunks
@@ -201,6 +307,15 @@ fn chunk_entries(entries: Vec<FileEntry>, size: usize) -> Vec<Vec<FileEntry>> {
     entries.chunks(size.max(1)).map(<[FileEntry]>::to_vec).collect()
 }
 
+/// A terminal chunk failure, carrying whatever response text was actually received (if any) so
+/// it can still be shown in the "Details" dialog / AI History even when parsing or reconciling
+/// failed — `raw_response` is `None` only when no response body was ever obtained (network
+/// error, timeout, or cancellation before a response arrived).
+struct ChunkError {
+    message: String,
+    raw_response: Option<String>,
+}
+
 /// Outcome of a single attempt inside `run_chunk`, distinguishing "timed out" (retryable) from
 /// "cancelled" (never retried) and other terminal failures, so the retry loop can decide
 /// correctly without string-matching error messages.
@@ -208,7 +323,7 @@ enum AttemptOutcome {
     Success(ParsedChunk),
     TimedOut,
     Cancelled,
-    Failed(String),
+    Failed(ChunkError),
 }
 
 /// Runs one chunk to completion, retrying exactly once if (and only if) the attempt times
@@ -223,7 +338,7 @@ async fn run_chunk(
     chunk_index: usize,
     generation_id: &str,
     cancel: &CancellationToken,
-) -> Result<ParsedChunk, String> {
+) -> Result<ParsedChunk, ChunkError> {
     const MAX_ATTEMPTS: u32 = 2; // one attempt + one retry, timeout-only
 
     for attempt_num in 1..=MAX_ATTEMPTS {
@@ -244,7 +359,10 @@ async fn run_chunk(
                     "ai::generate: generation_id={generation_id} chunk {chunk_index} cancelled \
                      (generation superseded or user-cancelled)"
                 );
-                return Err("Cancelled".to_string());
+                return Err(ChunkError {
+                    message: "Cancelled".to_string(),
+                    raw_response: None,
+                });
             }
             AttemptOutcome::Failed(e) => return Err(e),
             AttemptOutcome::TimedOut if attempt_num < MAX_ATTEMPTS => {
@@ -260,7 +378,10 @@ async fn run_chunk(
                      after {}s (retry also timed out)",
                     timeout.as_secs()
                 );
-                return Err(format!("Timed out after {}s (retried once)", timeout.as_secs()));
+                return Err(ChunkError {
+                    message: format!("Timed out after {}s (retried once)", timeout.as_secs()),
+                    raw_response: None,
+                });
             }
         }
     }
@@ -299,19 +420,34 @@ async fn run_chunk_attempt(
         Err(_) => AttemptOutcome::TimedOut,
         Ok(Err(e)) => {
             log_api_error(chunk_index, generation_id, &e);
-            AttemptOutcome::Failed(friendly_error(e))
+            AttemptOutcome::Failed(ChunkError {
+                message: friendly_error(e),
+                raw_response: None,
+            })
         }
         Ok(Ok(resp)) => {
             let text = match resp.text() {
                 Some(t) => t,
-                None => return AttemptOutcome::Failed("Model returned no text content".to_string()),
+                None => {
+                    return AttemptOutcome::Failed(ChunkError {
+                        message: "Model returned no text content".to_string(),
+                        raw_response: None,
+                    })
+                }
             };
             log::trace!(
                 "ai::generate: generation_id={generation_id} chunk {chunk_index} response={text}"
             );
             match extract_results(&text) {
-                Ok((items, parse_path)) => AttemptOutcome::Success(ParsedChunk { items, parse_path }),
-                Err(e) => AttemptOutcome::Failed(e),
+                Ok((items, parse_path)) => AttemptOutcome::Success(ParsedChunk {
+                    items,
+                    parse_path,
+                    raw_text: text,
+                }),
+                Err(e) => AttemptOutcome::Failed(ChunkError {
+                    message: e,
+                    raw_response: Some(text),
+                }),
             }
         }
     }
@@ -320,13 +456,14 @@ async fn run_chunk_attempt(
 /// Simulates one chunk of a provider round trip for the Dev menu's "Mock AI" toggle: optional
 /// artificial latency, then either a simulated failure or a deterministic transform of each
 /// file's stem. No network involved, so this runs through the same reconcile/logging path a
-/// real chunk would (see `generate`), just without the HTTP request.
+/// real chunk would (see `generate`), just without the HTTP request. `raw_response` on success
+/// is a synthesized rendering of the mocked items (there's no real wire text to show).
 async fn run_mock_chunk(
     mock: &MockAiConfig,
     chunk: &[FileEntry],
     chunk_index: usize,
     generation_id: &str,
-) -> Result<ParsedChunk, String> {
+) -> Result<ParsedChunk, ChunkError> {
     if mock.latency_ms > 0 {
         tokio::time::sleep(Duration::from_millis(mock.latency_ms as u64)).await;
     }
@@ -334,18 +471,24 @@ async fn run_mock_chunk(
         log::debug!(
             "ai::mock: generation_id={generation_id} chunk {chunk_index} simulating a provider failure"
         );
-        return Err("Mock AI: simulated provider failure".to_string());
+        return Err(ChunkError {
+            message: "Mock AI: simulated provider failure".to_string(),
+            raw_response: None,
+        });
     }
-    let items = chunk
+    let items: Vec<AiResultItem> = chunk
         .iter()
         .map(|e| AiResultItem {
             id: e.id.clone(),
             new_name: apply_mock_transform(mock.transform, &e.stem),
         })
         .collect();
+    let raw_text =
+        serde_json::to_string(&serde_json::json!({ "results": items })).unwrap_or_default();
     Ok(ParsedChunk {
         items,
         parse_path: ParsePath::WrappedObject,
+        raw_text,
     })
 }
 
@@ -397,6 +540,7 @@ fn log_api_error(chunk_index: usize, generation_id: &str, e: &aisdk::Error) {
 struct ParsedChunk {
     items: Vec<AiResultItem>,
     parse_path: ParsePath,
+    raw_text: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -872,12 +1016,15 @@ mod tests {
             None,
             CancellationToken::new(),
         )
-        .await
-        .unwrap();
+        .await;
 
+        assert!(report.error.is_none());
         assert_eq!(report.failed_chunks, 0);
         assert_eq!(report.results.len(), 1);
         assert_eq!(report.results[0].new_name, "Alpha");
+        assert_eq!(report.chunks.len(), 1);
+        assert_eq!(report.chunks[0].raw_response.as_deref(), Some(r#"{"results":[{"id":"a","newName":"Alpha"}]}"#));
+        assert_eq!(report.request.model, "test-model");
     }
 
     #[tokio::test]
@@ -892,7 +1039,7 @@ mod tests {
         let mut cfg = test_profile(server.uri());
         cfg.chunk_size = 1;
         let entries = vec![entry("a", "old", "txt")];
-        let err = generate(
+        let report = generate(
             &cfg,
             "sk-test",
             "rename".to_string(),
@@ -901,9 +1048,11 @@ mod tests {
             None,
             CancellationToken::new(),
         )
-        .await
-        .unwrap_err();
+        .await;
+        let err = report.error.expect("expected a hard failure");
         assert!(!err.is_empty());
+        assert_eq!(report.chunks.len(), 1);
+        assert!(report.chunks[0].error.is_some());
     }
 
     #[tokio::test]
@@ -937,13 +1086,15 @@ mod tests {
             None,
             CancellationToken::new(),
         )
-        .await
-        .unwrap();
+        .await;
 
+        assert!(report.error.is_none());
         assert_eq!(report.total_chunks, 2);
         assert_eq!(report.failed_chunks, 1);
         assert_eq!(report.results.len(), 1);
         assert!(report.warning.is_some());
+        assert_eq!(report.chunks.len(), 2);
+        assert_eq!(report.chunks.iter().filter(|c| c.error.is_some()).count(), 1);
     }
 
     #[tokio::test]
@@ -962,7 +1113,7 @@ mod tests {
         let mut cfg = test_profile(server.uri());
         cfg.timeout_secs = 1; // `generate` clamps to a 1s minimum, so this is the fastest case
         let entries = vec![entry("a", "old", "txt")];
-        let err = generate(
+        let report = generate(
             &cfg,
             "sk-test",
             "rename".to_string(),
@@ -971,8 +1122,8 @@ mod tests {
             None,
             CancellationToken::new(),
         )
-        .await
-        .unwrap_err();
+        .await;
+        let err = report.error.expect("expected a hard failure");
         assert!(err.contains("Timed out"));
     }
 
@@ -1010,9 +1161,9 @@ mod tests {
             None,
             CancellationToken::new(),
         )
-        .await
-        .unwrap();
+        .await;
 
+        assert!(report.error.is_none());
         assert_eq!(report.failed_chunks, 0);
         assert_eq!(report.results.len(), 1);
         assert_eq!(report.results[0].new_name, "Alpha");
@@ -1035,7 +1186,7 @@ mod tests {
         let mut cfg = test_profile(server.uri());
         cfg.timeout_secs = 1;
         let entries = vec![entry("a", "old", "txt")];
-        let err = generate(
+        let report = generate(
             &cfg,
             "sk-test",
             "rename".to_string(),
@@ -1044,8 +1195,8 @@ mod tests {
             None,
             CancellationToken::new(),
         )
-        .await
-        .unwrap_err();
+        .await;
+        let err = report.error.expect("expected a hard failure");
         assert!(err.contains("Timed out"));
         assert!(err.contains("retried"));
         // `.expect(2)` above is verified automatically by wiremock when `server` drops.
@@ -1064,7 +1215,7 @@ mod tests {
         let mut cfg = test_profile(server.uri());
         cfg.chunk_size = 1;
         let entries = vec![entry("a", "old", "txt")];
-        let err = generate(
+        let report = generate(
             &cfg,
             "sk-test",
             "rename".to_string(),
@@ -1073,8 +1224,8 @@ mod tests {
             None,
             CancellationToken::new(),
         )
-        .await
-        .unwrap_err();
+        .await;
+        let err = report.error.expect("expected a hard failure");
         assert!(!err.is_empty());
     }
 
@@ -1101,7 +1252,7 @@ mod tests {
             cancel_clone.cancel();
         });
 
-        let err = generate(
+        let report = generate(
             &cfg,
             "sk-test",
             "rename".to_string(),
@@ -1110,8 +1261,8 @@ mod tests {
             None,
             cancel,
         )
-        .await
-        .unwrap_err();
+        .await;
+        let err = report.error.expect("expected a hard failure");
         assert!(err.contains("Cancelled"), "expected Cancelled, got: {err}");
     }
 
@@ -1122,7 +1273,7 @@ mod tests {
         let cancel = CancellationToken::new();
         cancel.cancel(); // already cancelled before `generate` even starts chunking
 
-        let err = generate(
+        let report = generate(
             &cfg,
             "sk-test",
             "rename".to_string(),
@@ -1131,9 +1282,9 @@ mod tests {
             None,
             cancel,
         )
-        .await
-        .unwrap_err();
-        assert_eq!(err, "Cancelled");
+        .await;
+        assert_eq!(report.error.as_deref(), Some("Cancelled"));
+        assert!(report.chunks.is_empty());
     }
 
     // ---- Mock AI (Dev menu) -----------------------------------------------------------
@@ -1158,12 +1309,14 @@ mod tests {
             Some(mock),
             CancellationToken::new(),
         )
-        .await
-        .unwrap();
+        .await;
 
+        assert!(report.error.is_none());
         assert_eq!(report.failed_chunks, 0);
         assert_eq!(report.results.len(), 1);
         assert_eq!(report.results[0].new_name, "OLD");
+        assert!(report.request.mock);
+        assert!(report.chunks[0].raw_response.is_some());
     }
 
     #[tokio::test]
@@ -1175,7 +1328,7 @@ mod tests {
             fail_rate: 1.0,
             transform: MockTransform::Suffix,
         };
-        let err = generate(
+        let report = generate(
             &cfg,
             "",
             "rename".to_string(),
@@ -1184,8 +1337,8 @@ mod tests {
             Some(mock),
             CancellationToken::new(),
         )
-        .await
-        .unwrap_err();
+        .await;
+        let err = report.error.expect("expected a hard failure");
         assert!(err.contains("simulated"));
     }
 

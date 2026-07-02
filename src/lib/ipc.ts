@@ -5,6 +5,8 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type {
   AiGenerateReport,
+  AiGenerationDetail,
+  AiGenerationSummary,
   ApplyReport,
   FileCheck,
   FileEntry,
@@ -72,6 +74,14 @@ export function aiGenerate(
 
 export function cancelAiGenerate(generationId: string): Promise<void> {
   return invoke("cancel_ai_generate", { generationId });
+}
+
+export function listAiGenerations(): Promise<AiGenerationSummary[]> {
+  return invoke("list_ai_generations");
+}
+
+export function getAiGeneration(id: string): Promise<AiGenerationDetail | null> {
+  return invoke("get_ai_generation", { id });
 }
 
 export function getSettings(): Promise<SettingsState> {

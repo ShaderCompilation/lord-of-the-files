@@ -178,9 +178,76 @@ export interface SettingsState {
   mockAi: MockAiConfig;
 }
 
+// Full request/response detail behind one ai_generate call — see src-tauri/src/types.rs.
+export interface AiRequestMeta {
+  generationId: string;
+  createdAt: string;
+  profileId: string;
+  profileLabel: string;
+  baseUrl: string;
+  model: string;
+  instruction: string;
+  systemPrompt: string;
+  entryCount: number;
+  chunkSize: number;
+  concurrency: number;
+  timeoutSecs: number;
+  maxLen: number;
+  temperature: number;
+  mock: boolean;
+  hasKey: boolean;
+}
+
+export interface AiChunkDetail {
+  chunkIndex: number;
+  fileCount: number;
+  userPrompt: string;
+  rawResponse: string | null;
+  error: string | null;
+  parsePath: string | null;
+  elapsedMs: number;
+  modelCount: number | null;
+  droppedUnknown: number | null;
+  sanitizedCount: number | null;
+  missingIds: string[];
+}
+
 export interface AiGenerateReport {
   results: AiResultItem[];
   failedChunks: number;
   totalChunks: number;
   warning: string | null;
+  error: string | null;
+  request: AiRequestMeta;
+  chunks: AiChunkDetail[];
+}
+
+// AI History (see src-tauri/src/ai_history.rs).
+export type AiGenerationStatus = "ok" | "partial" | "failed";
+
+export interface AiGenerationSummary {
+  id: string;
+  createdAt: string;
+  profileLabel: string;
+  model: string;
+  instruction: string;
+  entryCount: number;
+  totalChunks: number;
+  failedChunks: number;
+  warning: string | null;
+  error: string | null;
+  mock: boolean;
+  status: AiGenerationStatus;
+}
+
+export interface AiGenerationDetail extends AiGenerationSummary {
+  baseUrl: string;
+  systemPrompt: string;
+  chunkSize: number;
+  concurrency: number;
+  timeoutSecs: number;
+  maxLen: number;
+  temperature: number;
+  hasKey: boolean;
+  chunks: AiChunkDetail[];
 }

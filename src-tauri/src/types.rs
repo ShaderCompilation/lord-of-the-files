@@ -81,7 +81,50 @@ pub struct AiResultItem {
     pub new_name: String,
 }
 
-/// Outcome of an `ai_generate` call: possibly-partial results plus batch accounting.
+/// Full configuration of one `ai_generate` call, captured once up front so both the step-level
+/// "Details" dialog and the persistent AI History panel can show exactly what was sent.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct AiRequestMeta {
+    pub generation_id: String,
+    pub created_at: String,
+    pub profile_id: String,
+    pub profile_label: String,
+    pub base_url: String,
+    pub model: String,
+    pub instruction: String,
+    pub system_prompt: String,
+    pub entry_count: usize,
+    pub chunk_size: u32,
+    pub concurrency: u32,
+    pub timeout_secs: u32,
+    pub max_len: u32,
+    pub temperature: f32,
+    pub mock: bool,
+    pub has_key: bool,
+}
+
+/// Full detail of one dispatched chunk: the exact prompt sent and the raw text received (or
+/// whatever's available on failure), plus reconcile diagnostics. `raw_response` is `None` only
+/// when no response body was ever obtained (network error, timeout, or cancellation).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct AiChunkDetail {
+    pub chunk_index: usize,
+    pub file_count: usize,
+    pub user_prompt: String,
+    pub raw_response: Option<String>,
+    pub error: Option<String>,
+    pub parse_path: Option<String>,
+    pub elapsed_ms: u64,
+    pub model_count: Option<usize>,
+    pub dropped_unknown: Option<usize>,
+    pub sanitized_count: Option<usize>,
+    pub missing_ids: Vec<String>,
+}
+
+/// Outcome of an `ai_generate` call: possibly-partial results plus batch accounting, and the
+/// full request/response detail behind it (used for the "Details" dialog and AI History).
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct AiGenerateReport {
@@ -89,6 +132,13 @@ pub struct AiGenerateReport {
     pub failed_chunks: u32,
     pub total_chunks: u32,
     pub warning: Option<String>,
+    /// Set when the whole generation failed outright (cancelled before dispatch, a bad
+    /// base_url, or every chunk failing) — the frontend still surfaces this as a rejected
+    /// promise to preserve existing error handling, but the report itself is always returned
+    /// (and always persisted to AI History) so failures stay inspectable.
+    pub error: Option<String>,
+    pub request: AiRequestMeta,
+    pub chunks: Vec<AiChunkDetail>,
 }
 
 /// The transform variants. Internally tagged by `type` so the TS union is ergonomic.

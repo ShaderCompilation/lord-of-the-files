@@ -920,6 +920,75 @@ textarea:focus {
   padding: 2px 0;
 }
 
+/* ---- AI request detail modal ---- */
+.ai-detail-modal {
+  width: 720px;
+}
+.ai-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+}
+.ai-detail-head-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ai-detail-config {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 16px;
+  font-size: 12px;
+  background: var(--bg-input);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.ai-detail-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ai-detail-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+.ai-detail-pre {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--bg-input);
+  border-radius: 6px;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.ai-chunk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ai-chunk-row {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.ai-chunk-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+.ai-chunk-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 /* ---- Settings panel ---- */
 .settings-panel {
   position: fixed;

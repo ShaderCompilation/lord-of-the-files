@@ -5,6 +5,7 @@ use tauri::State;
 use tokio_util::sync::CancellationToken;
 
 use crate::ai;
+use crate::ai_history::{self, AiGenerationDetail, AiGenerationSummary};
 use crate::ai_registry::AiGenerationRegistry;
 use crate::engine;
 use crate::fs_scan;
@@ -108,14 +109,15 @@ fn active_profile(state: &SettingsState) -> Result<ProviderProfile, String> {
 
 #[tauri::command]
 pub async fn ai_generate(
-    db: State<'_, SettingsDb>,
+    settings_db: State<'_, SettingsDb>,
+    history_db: State<'_, HistoryDb>,
     registry: State<'_, AiGenerationRegistry>,
     prompt: String,
     entries: Vec<FileEntry>,
     generation_id: String,
 ) -> Result<AiGenerateReport, String> {
     let (profile, mock) = {
-        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let conn = settings_db.0.lock().map_err(|e| e.to_string())?;
         let state = settings::load_state(&conn);
         let profile = active_profile(&state)?;
         let mock = state.mock_ai.enabled.then(|| state.mock_ai.clone());
@@ -133,9 +135,20 @@ pub async fn ai_generate(
     );
     log::trace!("ai_generate: prompt={prompt}");
     let token = registry.register(generation_id.clone());
-    let result = ai::generate(&profile, &key, prompt, entries, &generation_id, mock, token).await;
+    let report = ai::generate(&profile, &key, prompt, entries, &generation_id, mock, token).await;
     registry.remove(&generation_id);
-    result
+
+    {
+        let conn = history_db.0.lock().map_err(|e| e.to_string())?;
+        if let Err(e) = ai_history::record_generation(&conn, &report) {
+            log::warn!("ai_generate: generation_id={generation_id} failed to record AI history: {e}");
+        }
+    }
+
+    match report.error {
+        Some(e) => Err(e),
+        None => Ok(report),
+    }
 }
 
 /// Best-effort cancellation of an in-flight `ai_generate` call. Not an error if the
@@ -265,7 +278,7 @@ pub async fn test_connection(db: State<'_, SettingsDb>, profile_id: String) -> R
         size: 0,
         modified: None,
     }];
-    ai::generate(
+    let report = ai::generate(
         &profile,
         &key,
         "Echo the original name".to_string(),
@@ -274,16 +287,33 @@ pub async fn test_connection(db: State<'_, SettingsDb>, profile_id: String) -> R
         None, // always exercises the real provider, even if Mock AI is on
         CancellationToken::new(),
     )
-    .await
-    .map(|report| {
-        log::info!(
-            "test_connection: profile_id={profile_id} ok — {} result(s)",
-            report.results.len()
-        );
-        "ok".to_string()
-    })
-    .map_err(|e| {
-        log::warn!("test_connection: profile_id={profile_id} failed: {e}");
-        e
-    })
+    .await;
+
+    // Not persisted to AI History: this is a synthetic connectivity probe against a fake file,
+    // not a real user request.
+    match report.error {
+        None => {
+            log::info!(
+                "test_connection: profile_id={profile_id} ok — {} result(s)",
+                report.results.len()
+            );
+            Ok("ok".to_string())
+        }
+        Some(e) => {
+            log::warn!("test_connection: profile_id={profile_id} failed: {e}");
+            Err(e)
+        }
+    }
+}
+
+#[tauri::command]
+pub fn list_ai_generations(db: State<HistoryDb>) -> Result<Vec<AiGenerationSummary>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    ai_history::list_ai_generations(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_ai_generation(db: State<HistoryDb>, id: String) -> Result<Option<AiGenerationDetail>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    ai_history::get_ai_generation(&conn, &id).map_err(|e| e.to_string())
 }

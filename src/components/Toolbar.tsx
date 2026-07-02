@@ -5,6 +5,7 @@ import { Button, Checkbox } from "./common";
 
 export function Toolbar(props: {
   onToggleHistory: () => void;
+  onToggleAiHistory: () => void;
   onToggleSettings: () => void;
   onToggleDevMenu: () => void;
 }) {
@@ -62,6 +63,9 @@ export function Toolbar(props: {
       </Button>
       <Button variant="ghost" onClick={props.onToggleHistory}>
         History
+      </Button>
+      <Button variant="ghost" onClick={props.onToggleAiHistory}>
+        AI History
       </Button>
 
       <Show when={conflicts() > 0}>

@@ -9,6 +9,8 @@ import * as ipc from "./lib/ipc";
 import { log } from "./lib/log";
 import { defaultStep } from "./lib/steps";
 import type {
+  AiGenerationDetail,
+  AiGenerationSummary,
   AiResultItem,
   FileCheck,
   Failure,
@@ -402,12 +404,22 @@ export async function confirmPendingAction(): Promise<void> {
 const [aiLoading, setAiLoading] = createSignal<Set<string>>(new Set());
 const [aiStepError, setAiStepError] = createSignal<Map<string, string>>(new Map());
 const [aiGenerationId, setAiGenerationId] = createSignal<Map<string, string>>(new Map());
+// Unlike `aiGenerationId` (cleared on cancel, used for live/race checks), this survives
+// cancellation/completion so the step's "Details" button can keep referencing the most recent
+// generation even after it's done or was cancelled.
+const [aiLastGenerationId, setAiLastGenerationId] = createSignal<Map<string, string>>(new Map());
 
 export function isAiLoading(stepId: string): boolean {
   return aiLoading().has(stepId);
 }
 export function aiErrorFor(stepId: string): string | undefined {
   return aiStepError().get(stepId);
+}
+export function hasAiGeneration(stepId: string): boolean {
+  return aiLastGenerationId().has(stepId);
+}
+export function lastAiGenerationId(stepId: string): string | undefined {
+  return aiLastGenerationId().get(stepId);
 }
 function setAiBusy(stepId: string, busy: boolean) {
   setAiLoading((prev) => {
@@ -442,6 +454,7 @@ export async function generateAi(stepId: string, prompt: string): Promise<void> 
     });
   }
   setAiGenerationId((prev) => new Map(prev).set(stepId, generationId));
+  setAiLastGenerationId((prev) => new Map(prev).set(stepId, generationId));
   setAiStepError((prev) => {
     const next = new Map(prev);
     next.delete(stepId);
@@ -514,6 +527,13 @@ export async function generateAi(stepId: string, prompt: string): Promise<void> 
     if (isLive()) {
       setAiBusy(stepId, false);
     }
+    // The backend persists this generation to AI History regardless of success/failure —
+    // refresh the list, and if its Details dialog happens to be open (opened while the
+    // generation was still in flight, so the first fetch found nothing yet), retry now.
+    void refreshAiHistory();
+    if (aiDetailOpenId() === generationId) {
+      void fetchAiDetail(generationId);
+    }
   }
 }
 
@@ -533,6 +553,58 @@ export function cancelAi(stepId: string): void {
       log.debug(`cancelAi: best-effort cancel of generation=${generationId} failed: ${String(e)}`);
     });
   }
+}
+
+// ---- AI History (persistent request/response log; separate from rename history) -------
+
+const [aiHistory, setAiHistory] = createSignal<AiGenerationSummary[]>([]);
+const [aiDetailOpenId, setAiDetailOpenId] = createSignal<string | null>(null);
+const [aiDetail, setAiDetail] = createSignal<Map<string, AiGenerationDetail>>(new Map());
+const [aiDetailLoading, setAiDetailLoading] = createSignal<Set<string>>(new Set());
+export { aiHistory, aiDetailOpenId, aiDetail };
+
+export function isAiDetailLoading(id: string): boolean {
+  return aiDetailLoading().has(id);
+}
+
+export async function refreshAiHistory(): Promise<void> {
+  try {
+    setAiHistory(await ipc.listAiGenerations());
+  } catch (e) {
+    log.error(`refreshAiHistory failed: ${String(e)}`);
+    setNotice(`Could not load AI history: ${String(e)}`);
+  }
+}
+
+async function fetchAiDetail(id: string): Promise<void> {
+  setAiDetailLoading((prev) => new Set(prev).add(id));
+  try {
+    const detail = await ipc.getAiGeneration(id);
+    if (detail) {
+      setAiDetail((prev) => new Map(prev).set(id, detail));
+    }
+  } catch (e) {
+    log.error(`fetchAiDetail failed: ${String(e)}`);
+    setNotice(`Could not load AI request detail: ${String(e)}`);
+  } finally {
+    setAiDetailLoading((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }
+}
+
+/** Opens the shared AI request detail dialog for `id`, fetching it if not already cached — a
+ * generation still in flight won't have a row yet, so the dialog shows a "still running" state
+ * until `generateAi`'s completion refetches it (see the `finally` block above). */
+export function openAiDetail(id: string): void {
+  setAiDetailOpenId(id);
+  if (!aiDetail().has(id)) void fetchAiDetail(id);
+}
+
+export function closeAiDetail(): void {
+  setAiDetailOpenId(null);
 }
 
 // ---- Settings / providers ---------------------------------------------------------------

@@ -9,11 +9,14 @@ import { Toolbar } from "./components/Toolbar";
 import { FileTable } from "./components/FileTable";
 import { PipelineEditor } from "./components/PipelineEditor";
 import { HistoryPanel } from "./components/HistoryPanel";
+import { AiHistoryPanel } from "./components/AiHistoryPanel";
+import { AiRequestDetailModal } from "./components/AiRequestDetailModal";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { DevMenu } from "./components/DevMenu";
 
 export default function App() {
   const [historyOpen, setHistoryOpen] = createSignal(false);
+  const [aiHistoryOpen, setAiHistoryOpen] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [devMenuOpen, setDevMenuOpen] = createSignal(false);
 
@@ -36,6 +39,7 @@ export default function App() {
     };
 
     await s.refreshHistory();
+    await s.refreshAiHistory();
     await s.loadSettings();
     const unlisten = await getCurrentWebview().onDragDropEvent((event) => {
       if (event.payload.type === "drop") {
@@ -49,6 +53,7 @@ export default function App() {
     <div class="app">
       <Toolbar
         onToggleHistory={() => setHistoryOpen((v) => !v)}
+        onToggleAiHistory={() => setAiHistoryOpen((v) => !v)}
         onToggleSettings={() => setSettingsOpen((v) => !v)}
         onToggleDevMenu={() => setDevMenuOpen((v) => !v)}
       />
@@ -68,6 +73,8 @@ export default function App() {
       </main>
 
       <HistoryPanel open={historyOpen()} onClose={() => setHistoryOpen(false)} />
+      <AiHistoryPanel open={aiHistoryOpen()} onClose={() => setAiHistoryOpen(false)} />
+      <AiRequestDetailModal />
       <SettingsPanel open={settingsOpen()} onClose={() => setSettingsOpen(false)} />
       <Show when={import.meta.env.DEV}>
         <DevMenu open={devMenuOpen()} onClose={() => setDevMenuOpen(false)} />

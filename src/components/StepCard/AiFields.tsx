@@ -67,6 +67,16 @@ export function AiFields(props: { step: Variant<"ai">; set: SetFn; id: string })
           </Button>
         </Show>
 
+        <Show when={s.hasAiGeneration(props.id)}>
+          <Button
+            variant="ghost"
+            small
+            onClick={() => s.openAiDetail(s.lastAiGenerationId(props.id)!)}
+          >
+            Details
+          </Button>
+        </Show>
+
         <Show
           when={running()}
           fallback={

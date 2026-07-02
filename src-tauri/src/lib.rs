@@ -1,4 +1,5 @@
 mod ai;
+mod ai_history;
 mod ai_registry;
 mod commands;
 mod engine;
@@ -32,6 +33,7 @@ pub fn run() {
             std::fs::create_dir_all(&dir)?;
             let conn = Connection::open(dir.join("history.db"))?;
             history::init_schema(&conn)?;
+            ai_history::init_schema(&conn)?;
             app.manage(HistoryDb(Mutex::new(conn)));
 
             let settings_conn = Connection::open(dir.join("settings.db"))?;
@@ -55,6 +57,8 @@ pub fn run() {
             commands::preview_redo,
             commands::ai_generate,
             commands::cancel_ai_generate,
+            commands::list_ai_generations,
+            commands::get_ai_generation,
             commands::get_settings,
             commands::upsert_profile,
             commands::delete_profile,
