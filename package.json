@@ -8,6 +8,7 @@
     "start": "vite",
     "dev": "vite",
     "build": "vite build",
+    "build:appimage:podman": "./scripts/build-appimage-podman.sh",
     "test:frontend": "vitest run --environment node",
     "serve": "vite preview",
     "tauri": "tauri"
