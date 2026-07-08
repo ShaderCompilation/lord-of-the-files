@@ -1,113 +1,166 @@
 # Lord of the Files
 
-A desktop suite of file tools. **Stage 1** is a batch **file renamer** with a composable
-transform pipeline, live two-column diff preview, conflict detection, and persistent
-undo/redo.
+[![CI](https://github.com/ShaderCompilation/lord-of-the-files/actions/workflows/ci.yml/badge.svg)](https://github.com/ShaderCompilation/lord-of-the-files/actions/workflows/ci.yml)
+[![Desktop Builds](https://github.com/ShaderCompilation/lord-of-the-files/actions/workflows/desktop-builds.yml/badge.svg)](https://github.com/ShaderCompilation/lord-of-the-files/actions/workflows/desktop-builds.yml)
 
-- **Shell:** Tauri v2 · **Engine:** Rust · **UI:** SolidJS + TypeScript
-- The Rust engine is the single source of truth: both the live preview and the actual
-  rename derive new names from the same `compute_preview` code path.
+Lord of the Files is a desktop batch-renaming app for files and folders. It gives you a
+composable rename pipeline, a live before/after diff, conflict detection, persistent
+undo/redo, and an optional bring-your-own-key AI rename step.
 
-## Features (Stage 1)
+The current release is focused on batch renaming. Future releases may add more file tools.
 
-- Add files/folders via dialog or drag-and-drop. Recursive descent and extension
-  preservation are on by default (both toggleable).
-- **Composable pipeline** of ordered, reorderable, toggleable steps:
-  Find & Replace · Regex · Change Case · Insert · Remove · Clean Up · Counter · AI Rename.
-- Two-column preview with inline char-level diff (green = added, red = removed) and
-  per-row status: Unchanged / Changed / Conflict / Invalid.
-- Conflict & validation detection (collisions, pre-existing files, invalid chars,
-  case-only changes) blocks unsafe applies.
-- Known v1 caveat: Unicode-equivalent names with different normalization forms (for example
-  NFC vs NFD) are not currently folded together, so some macOS-style normalization collisions
-  may not be caught before apply.
-- **Persistent history** with multi-level undo/redo (SQLite in the app data dir).
-- Pipeline **presets** saved in localStorage.
-- **AI Rename** step is BYOK (bring your own key): configure any OpenAI-compatible provider
-  in Settings — OpenAI, OpenRouter, Groq, Together, Fireworks, DeepInfra, Mistral, DeepSeek,
-  xAI, Perplexity, Gemini, or local Ollama/LM Studio. Keys are stored in the OS keychain and
-  never leave the Rust side after entry.
+## Download
 
-## Prerequisites
+Installers are published on the
+[GitHub Releases page](https://github.com/ShaderCompilation/lord-of-the-files/releases).
 
-- Node + [pnpm](https://pnpm.io), Rust toolchain, and the Tauri Linux system deps
-  (`webkit2gtk-4.1`).
+- **Linux:** download the AppImage, make it executable, then run it.
+- **macOS:** download the universal DMG and drag the app into Applications.
+- **Windows:** download the generated `.exe` or `.msi` installer.
 
-## Develop
+Release builds are currently unsigned. macOS Gatekeeper and Windows SmartScreen may show an
+unknown-publisher warning on first launch.
+
+## Features
+
+- Add files or folders with a file picker or drag-and-drop.
+- Rename recursively, with extension preservation enabled by default.
+- Build ordered pipelines from reusable steps:
+  - Find & Replace
+  - Regex
+  - Change Case
+  - Insert
+  - Remove
+  - Clean Up
+  - Counter
+  - AI Rename
+- Preview every change in a two-column table with inline character-level diffs.
+- Detect unsafe changes before applying: duplicate output names, existing destination files,
+  invalid names, and case-only changes.
+- Save pipeline presets locally.
+- Undo and redo previous rename operations across app restarts.
+- Review AI requests in a persistent AI history panel.
+
+## Basic Usage
+
+1. Add files or folders.
+2. Build a rename pipeline from the step menu.
+3. Review the preview table. Rows marked as conflicts or invalid must be fixed before apply.
+4. Apply the rename.
+5. Use History to inspect, undo, or redo past operations.
+
+Lord of the Files only renames filesystem entries. It does not read or modify file contents.
+For important folders, keep a backup until you are comfortable with the preview and history
+flow.
+
+## AI Rename
+
+AI Rename is optional and bring-your-own-key. Open Settings, add a provider profile, choose a
+preset, and enter your API key. Supported presets include OpenAI, OpenRouter, Groq, Together,
+Fireworks, DeepInfra, Mistral, DeepSeek, xAI, Perplexity, Gemini, Ollama, and LM Studio.
+
+When AI Rename is used, the app sends filenames, extensions, parent-folder hints, and your
+instruction to the active provider. It does not send file contents. API keys are stored in the
+OS keychain and are not sent back to the frontend after entry.
+
+For local/offline workflows, run Ollama or LM Studio and select the matching provider preset.
+
+## Known Limitations
+
+- Release builds are not code-signed yet.
+- Unicode-equivalent names with different normalization forms, such as NFC vs NFD, are not
+  folded together before apply. This can miss some macOS-style normalization collisions.
+- AI Rename quality depends on the configured provider, model, prompt, and available context.
+
+## Architecture
+
+- **Shell:** Tauri v2
+- **Backend:** Rust
+- **Frontend:** SolidJS and TypeScript
+- **Storage:** SQLite for rename history, settings, and AI history; OS keychain for API keys
+
+The Rust engine is the single source of truth for renaming. The preview and the actual rename
+operation both derive output names from the same `compute_preview` path, so the frontend does
+not reimplement rename logic.
+
+## Development
+
+### Prerequisites
+
+- Node.js 20 or newer
+- pnpm 11.8.0 or newer
+- Rust stable
+- Tauri v2 system dependencies for your platform
+
+On Linux, Tauri requires WebKitGTK and related native packages. For Debian/Ubuntu-based
+systems, install the packages listed in `.github/workflows/ci.yml`.
+
+### Run Locally
 
 ```bash
 pnpm install
-
-# Run the app (Vite + Tauri)
 pnpm tauri dev
 ```
 
-BYOK: open Settings in the app and add a provider profile (a preset prefills the base URL and
-a default model). For offline dev, run [Ollama](https://ollama.com) locally and pick the
-Ollama preset with a blank API key. Headless/CI can skip the keychain via `LOTF_API_KEY`.
+Headless or CI environments can provide an AI key through `LOTF_API_KEY` when the OS keychain
+is unavailable.
 
-## Test
+### Test
 
 ```bash
-cd src-tauri && cargo test     # engine, conflicts, history, full scan→apply→undo chain
-pnpm exec tsc --noEmit         # frontend type check
+pnpm exec tsc --noEmit
+pnpm test:frontend
+cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-## Build
+### Build
 
 ```bash
 pnpm tauri build
 ```
 
-Produces native installers/bundles for the host OS (`bundle.targets` is `"all"` in
-`src-tauri/tauri.conf.json`) — e.g. `.deb`/`.rpm`/AppImage on Linux, `.app`/`.dmg` on macOS,
-NSIS `.exe`/`.msi` on Windows. **Builds are currently unsigned** — no code-signing identity is
-configured, so macOS Gatekeeper and Windows SmartScreen will show an "unknown publisher"
-warning on first launch. See the [Tauri distribution docs](https://v2.tauri.app/distribute/) if
-signing is added later.
+Tauri writes native bundles under `src-tauri/target/release/bundle/`.
 
-## Release Builds
+## Release Process
 
-GitHub Actions builds desktop installers from `.github/workflows/desktop-builds.yml`.
+GitHub Actions builds desktop installers from
+[`.github/workflows/desktop-builds.yml`](.github/workflows/desktop-builds.yml).
 
-Manual test build:
+To run a manual test build, use **Actions -> Desktop Builds -> Run workflow** in GitHub.
+
+To publish a release:
 
 ```bash
-# GitHub UI: Actions -> Desktop Builds -> Run workflow
-```
-
-Publish a release:
-
-```bash
-# Keep this in sync with src-tauri/tauri.conf.json and package.json.
+# Keep these versions in sync first:
+# - package.json
+# - src-tauri/tauri.conf.json
+# - src-tauri/Cargo.toml
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-Pushing a `v*` tag runs Linux, macOS, and Windows builds. The workflow uploads build
-artifacts for every run and publishes a GitHub Release for tag builds. Linux publishes an
-AppImage; macOS publishes a universal DMG; Windows publishes the generated installer files.
+Pushing a `v*` tag runs Linux, macOS, and Windows builds. The workflow checks that the tag
+matches the Tauri app version, uploads build artifacts, and publishes a GitHub Release with
+generated release notes.
 
-## Layout
+## Project Layout
 
-```
+```text
 src-tauri/src/
-  engine/{mod,steps,conflicts}.rs   # pipeline transforms + validation (single source of truth)
-  fs_scan.rs                        # selection -> FileEntry list (recursive, dedup)
-  history.rs                        # SQLite, two-phase apply, undo/redo
-  settings.rs                       # provider profiles (SQLite) + API keys (OS keychain)
-  ai.rs                             # BYOK: aisdk-backed OpenAI-compatible adapter, chunking
-  types.rs / commands.rs / lib.rs   # shared types, Tauri commands, wiring
+  engine/                 Rename pipeline transforms and validation
+  fs_scan.rs              Selection scanning, recursive descent, deduplication
+  history.rs              SQLite-backed apply, undo, and redo
+  settings.rs             Provider profiles and keychain-backed API keys
+  ai.rs                   OpenAI-compatible AI rename adapter
+  ai_history.rs           Persistent AI request history
+  commands.rs             Tauri command handlers
+
 src/
-  store.ts                          # central reactive state + actions
-  lib/{types,ipc,diff,steps,presets,providers}.ts
-  components/{Toolbar,FileTable,DiffText,StepCard,PipelineEditor,HistoryPanel,SettingsPanel}.tsx
+  store.ts                Central SolidJS state and app actions
+  lib/                    IPC wrappers, shared types, diffs, presets, providers
+  components/             Toolbar, file table, pipeline editor, settings, history
 ```
 
-## BYOK AI rename
+## License
 
-The AI step sends filenames (stem + extension + parent folder hint) and your instruction to
-whichever OpenAI-compatible endpoint is configured as the active provider in Settings. No
-content is ever read from the files themselves. Requests are chunked and dispatched with
-bounded concurrency (both configurable per profile); a chunk that errors or times out is
-counted as a partial failure rather than aborting the whole batch.
+MIT
