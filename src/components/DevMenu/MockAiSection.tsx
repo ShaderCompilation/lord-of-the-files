@@ -11,7 +11,7 @@ const TRANSFORMS: { value: MockTransform; label: string }[] = [
 ];
 
 function update(patch: Partial<MockAiConfig>) {
-  void s.setMockAiConfig({ ...s.settings().mockAi, ...patch });
+  void s.setMockAiConfig({ ...s.settings().mockAi, ...patch }).catch(() => undefined);
 }
 
 export function MockAiSection() {

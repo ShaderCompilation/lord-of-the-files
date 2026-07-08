@@ -21,7 +21,7 @@ export function GeneralSettings() {
       <h3>General</h3>
       <Checkbox
         checked={s.settings().debugLogging}
-        onChange={(v) => void s.setDebugLogging(v)}
+        onChange={(v) => void s.setDebugLogging(v).catch(() => undefined)}
       >
         Enable debug logs
       </Checkbox>

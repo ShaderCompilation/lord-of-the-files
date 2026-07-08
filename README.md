@@ -18,6 +18,9 @@ undo/redo.
   per-row status: Unchanged / Changed / Conflict / Invalid.
 - Conflict & validation detection (collisions, pre-existing files, invalid chars,
   case-only changes) blocks unsafe applies.
+- Known v1 caveat: Unicode-equivalent names with different normalization forms (for example
+  NFC vs NFD) are not currently folded together, so some macOS-style normalization collisions
+  may not be caught before apply.
 - **Persistent history** with multi-level undo/redo (SQLite in the app data dir).
 - Pipeline **presets** saved in localStorage.
 - **AI Rename** step is BYOK (bring your own key): configure any OpenAI-compatible provider

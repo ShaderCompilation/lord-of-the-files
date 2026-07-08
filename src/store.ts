@@ -51,6 +51,7 @@ export async function addPaths(paths: string[]): Promise<void> {
       for (const f of scanned) byId.set(f.id, f);
       return [...byId.values()];
     });
+    markPreviewStale();
     log.debug(`addPaths: scanned ${scanned.length} entries, ${files().length} total`);
   } catch (e) {
     log.error(`addPaths failed: ${String(e)}`);
@@ -72,12 +73,16 @@ export async function pickFolder(): Promise<void> {
 
 export function removeFile(id: string): void {
   setFiles((prev) => prev.filter((f) => f.id !== id));
+  markPreviewStale();
 }
 
 export function clearFiles(): void {
   setFiles([]);
   setExcluded(new Set<string>());
   setTableFilter("all");
+  markPreviewStale();
+  setPreview({ rows: [], stepErrors: [] });
+  setPreviewAppliedVersion(previewInputVersion());
 }
 
 // ---- Scan / assembly options -----------------------------------------------------------
@@ -91,7 +96,18 @@ export { recursive, setRecursive, includeDirs, setIncludeDirs, preserveExt, setP
 
 const [pipeline, setPipeline] = createStore<{ steps: StepConfig[] }>({ steps: [] });
 const [pipelineVersion, setPipelineVersion] = createSignal(0);
-const bump = () => setPipelineVersion((v) => v + 1);
+const [previewInputVersion, setPreviewInputVersion] = createSignal(0);
+const [previewAppliedVersion, setPreviewAppliedVersion] = createSignal(0);
+let previewRequestId = 0;
+
+function markPreviewStale(): void {
+  setPreviewInputVersion((v) => v + 1);
+}
+
+const bump = () => {
+  setPipelineVersion((v) => v + 1);
+  markPreviewStale();
+};
 
 export { pipeline, pipelineVersion };
 
@@ -149,6 +165,14 @@ const [preview, setPreview] = createSignal<PreviewResult>({ rows: [], stepErrors
 const [previewLoading, setPreviewLoading] = createSignal(false);
 export { preview, previewLoading };
 
+export function previewStale(): boolean {
+  return files().length > 0 && previewAppliedVersion() !== previewInputVersion();
+}
+
+export function previewReady(): boolean {
+  return !previewLoading() && !previewStale();
+}
+
 // Which preview rows the file table shows. Lifted into the store so the toolbar's
 // "conflicts" affordance can jump the table straight to the blocking rows.
 export type TableFilter = "all" | "changed" | "conflict" | "unchanged";
@@ -181,25 +205,36 @@ export function stepErrorFor(stepId: string): string | undefined {
 /** Recompute the preview for the current files + pipeline. */
 export async function runPreview(): Promise<void> {
   const entries = files();
+  const version = previewInputVersion();
+  const requestId = ++previewRequestId;
   if (entries.length === 0) {
     setPreview({ rows: [], stepErrors: [] });
+    setPreviewAppliedVersion(version);
+    setPreviewLoading(false);
     return;
   }
   log.debug(`runPreview: ${entries.length} entries, ${pipeline.steps.length} step(s)`);
   setPreviewLoading(true);
   try {
     const result = await ipc.computePreview(entries, { steps: pipeline.steps });
+    if (requestId !== previewRequestId || version !== previewInputVersion()) {
+      log.debug(`runPreview: ignored stale result request=${requestId}`);
+      return;
+    }
     setPreview(result);
+    setPreviewAppliedVersion(version);
     if (result.stepErrors.length > 0) {
       for (const err of result.stepErrors) {
         log.warn(`runPreview step error: stepId=${err.stepId} ${err.message}`);
       }
     }
   } catch (e) {
-    log.error(`runPreview failed: ${String(e)}`);
-    setNotice(`Preview failed: ${String(e)}`);
+    if (requestId === previewRequestId) {
+      log.error(`runPreview failed: ${String(e)}`);
+      setNotice(`Preview failed: ${String(e)}`);
+    }
   } finally {
-    setPreviewLoading(false);
+    if (requestId === previewRequestId) setPreviewLoading(false);
   }
 }
 
@@ -236,6 +271,13 @@ export function applicableRows() {
 }
 
 export async function applyAll(): Promise<void> {
+  if (!previewReady()) {
+    await runPreview();
+  }
+  if (!previewReady()) {
+    setNotice("Preview is still updating. Try again when it finishes.");
+    return;
+  }
   const rows = applicableRows();
   if (rows.length === 0) return;
   const items = rows.map((r) => ({ oldPath: r.id, newName: r.newName }));
@@ -255,6 +297,7 @@ export async function applyAll(): Promise<void> {
         return { ...f, id: newPath, path: newPath, stem, ext };
       }),
     );
+    markPreviewStale();
     await refreshHistory();
     for (const f of report.failures) {
       log.warn(`applyAll failed: ${f.path}: ${f.error}`);
@@ -639,6 +682,7 @@ export async function upsertProfile(profile: ProviderProfile): Promise<void> {
   } catch (e) {
     log.error(`upsertProfile failed: ${String(e)}`);
     setNotice(`Could not save profile: ${String(e)}`);
+    throw e;
   }
 }
 
@@ -650,6 +694,7 @@ export async function deleteProfile(id: string): Promise<void> {
   } catch (e) {
     log.error(`deleteProfile failed: ${String(e)}`);
     setNotice(`Could not delete profile: ${String(e)}`);
+    throw e;
   }
 }
 
@@ -661,6 +706,7 @@ export async function setActiveProfile(id: string): Promise<void> {
   } catch (e) {
     log.error(`setActiveProfile failed: ${String(e)}`);
     setNotice(`Could not set active profile: ${String(e)}`);
+    throw e;
   }
 }
 
@@ -673,6 +719,7 @@ export async function saveApiKey(profileId: string, key: string): Promise<void> 
   } catch (e) {
     log.error(`saveApiKey failed: ${String(e)}`);
     setNotice(`Could not save API key: ${String(e)}`);
+    throw e;
   }
 }
 
@@ -684,6 +731,7 @@ export async function clearApiKey(profileId: string): Promise<void> {
   } catch (e) {
     log.error(`clearApiKey failed: ${String(e)}`);
     setNotice(`Could not clear API key: ${String(e)}`);
+    throw e;
   }
 }
 
@@ -707,6 +755,7 @@ export async function setDebugLogging(enabled: boolean): Promise<void> {
   } catch (e) {
     log.error(`setDebugLogging failed: ${String(e)}`);
     setNotice(`Could not update debug logging: ${String(e)}`);
+    throw e;
   }
 }
 
@@ -723,5 +772,6 @@ export async function setMockAiConfig(config: MockAiConfig): Promise<void> {
   } catch (e) {
     log.error(`setMockAiConfig failed: ${String(e)}`);
     setNotice(`Could not update Mock AI config: ${String(e)}`);
+    throw e;
   }
 }

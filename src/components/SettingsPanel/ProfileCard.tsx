@@ -16,7 +16,7 @@ export function ProfileCard(props: { profile: ProviderProfile; onEdit: () => voi
         class="provider-active"
         title="Use for AI Rename"
         checked={active()}
-        onChange={() => s.setActiveProfile(props.profile.id)}
+        onChange={() => void s.setActiveProfile(props.profile.id).catch(() => undefined)}
       />
       <Button class="provider-main" onClick={props.onEdit} title="Edit">
         <span class="provider-name">{props.profile.label || "(unnamed)"}</span>
@@ -34,7 +34,11 @@ export function ProfileCard(props: { profile: ProviderProfile; onEdit: () => voi
             </Button>
           }
         >
-          <Button small class="confirm-delete" onClick={() => s.deleteProfile(props.profile.id)}>
+          <Button
+            small
+            class="confirm-delete"
+            onClick={() => void s.deleteProfile(props.profile.id).catch(() => undefined)}
+          >
             Delete?
           </Button>
           <Button variant="icon" title="Cancel" onClick={() => setConfirming(false)}>

@@ -114,17 +114,21 @@ export function createProfileEditor(): ProfileEditor {
   async function save(): Promise<boolean> {
     const d = draft();
     if (!d || !canSave()) return false;
-    await s.upsertProfile(d);
-    const hasKeyInput = keyInput().trim() !== "";
-    if (hasKeyInput) await s.saveApiKey(d.id, keyInput());
-    // First profile ever (or none active after a delete): make it active so AI Rename works right away.
-    if (!s.settings().activeProfileId) await s.setActiveProfile(d.id);
-    if (hasKeyInput) {
-      setDraft({ ...d, hasKey: true });
-      setKeyInput("");
-      setReplacingKey(false);
+    try {
+      await s.upsertProfile(d);
+      const hasKeyInput = keyInput().trim() !== "";
+      if (hasKeyInput) await s.saveApiKey(d.id, keyInput());
+      // First profile ever (or none active after a delete): make it active so AI Rename works right away.
+      if (!s.settings().activeProfileId) await s.setActiveProfile(d.id);
+      if (hasKeyInput) {
+        setDraft({ ...d, hasKey: true });
+        setKeyInput("");
+        setReplacingKey(false);
+      }
+      return true;
+    } catch {
+      return false;
     }
-    return true;
   }
 
   async function test() {
@@ -134,7 +138,10 @@ export function createProfileEditor(): ProfileEditor {
     setTestStatus(null);
     try {
       // Auto-save first so we test exactly what's on screen (test_connection loads the saved profile).
-      if (!(await save())) return;
+      if (!(await save())) {
+        setTestStatus({ ok: false, message: "Could not save profile" });
+        return;
+      }
       await s.testConnection(d.id);
       setTestStatus({ ok: true, message: "ok" });
     } catch (e) {
@@ -147,10 +154,14 @@ export function createProfileEditor(): ProfileEditor {
   async function removeKey() {
     const d = draft();
     if (!d) return;
-    await s.clearApiKey(d.id);
-    setDraft({ ...d, hasKey: false });
-    setReplacingKey(false);
-    setKeyInput("");
+    try {
+      await s.clearApiKey(d.id);
+      setDraft({ ...d, hasKey: false });
+      setReplacingKey(false);
+      setKeyInput("");
+    } catch {
+      // The store already surfaced a notice; keep local state unchanged.
+    }
   }
 
   return {

@@ -12,6 +12,7 @@ export function Toolbar(props: {
   const hasFiles = () => s.files().length > 0;
   const applicable = createMemo(() => s.applicableRows().length);
   const conflicts = createMemo(() => s.previewCounts().conflict);
+  const previewBusy = () => s.previewLoading() || s.previewStale();
   const mockAiOn = () => import.meta.env.DEV && s.settings().mockAi.enabled;
 
   const jumpToConflicts = () => s.setTableFilter("conflict");
@@ -81,8 +82,14 @@ export function Toolbar(props: {
       <Button
         variant="primary"
         onClick={s.applyAll}
-        disabled={applicable() === 0 || conflicts() > 0}
-        title={conflicts() > 0 ? "Resolve conflicts before applying" : ""}
+        disabled={applicable() === 0 || conflicts() > 0 || previewBusy()}
+        title={
+          conflicts() > 0
+            ? "Resolve conflicts before applying"
+            : previewBusy()
+              ? "Preview is updating"
+              : ""
+        }
       >
         {applicable() > 0
           ? `Rename ${applicable()} file${applicable() === 1 ? "" : "s"}`

@@ -38,7 +38,7 @@ export function AiFields(props: { step: Variant<"ai">; set: SetFn; id: string })
         <SelectField
           label="Provider"
           value={s.activeProfile()?.id ?? ""}
-          onChange={(v) => s.setActiveProfile(v)}
+          onChange={(v) => void s.setActiveProfile(v).catch(() => undefined)}
         >
           <For each={s.settings().profiles}>
             {(profile) => (
