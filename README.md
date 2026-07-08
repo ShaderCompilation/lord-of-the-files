@@ -66,6 +66,28 @@ configured, so macOS Gatekeeper and Windows SmartScreen will show an "unknown pu
 warning on first launch. See the [Tauri distribution docs](https://v2.tauri.app/distribute/) if
 signing is added later.
 
+## Release Builds
+
+GitHub Actions builds desktop installers from `.github/workflows/desktop-builds.yml`.
+
+Manual test build:
+
+```bash
+# GitHub UI: Actions -> Desktop Builds -> Run workflow
+```
+
+Publish a release:
+
+```bash
+# Keep this in sync with src-tauri/tauri.conf.json and package.json.
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Pushing a `v*` tag runs Linux, macOS, and Windows builds. The workflow uploads build
+artifacts for every run and publishes a GitHub Release for tag builds. Linux publishes an
+AppImage; macOS publishes a universal DMG; Windows publishes the generated installer files.
+
 ## Layout
 
 ```
